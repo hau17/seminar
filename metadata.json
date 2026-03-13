@@ -1,0 +1,5 @@
+{
+  "name": "POI & Tour Admin Dashboard",
+  "description": "Hệ thống quản lý điểm tham quan (POIs) và tạo lộ trình tour trên bản đồ cho Admin.",
+  "requestFramePermissions": ["geolocation"]
+}
