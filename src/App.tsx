@@ -59,11 +59,49 @@ const POI_ICONS: Record<POIType, string> = {
   [POIType.PORT]: "⚓",
 };
 
+// ✅ FIX #9: FR-POI-001 Color-coded Markers by POI type
+const getMarkerIcon = (poiType: POIType, isSelected: boolean) => {
+  // Color scheme: MAIN=Blue, others=Orange, Selected=Green
+  const colorMap: Record<POIType, string> = {
+    [POIType.MAIN]: "#3b82f6", // Blue for main POI
+    [POIType.WC]: "#f97316", // Orange for minor POIs
+    [POIType.TICKET]: "#f97316",
+    [POIType.PARKING]: "#f97316",
+    [POIType.PORT]: "#f97316",
+  };
+
+  const bgColor = isSelected ? "#22c55e" : colorMap[poiType]; // Green when selected
+  const emoji = POI_ICONS[poiType];
+
+  return L.divIcon({
+    html: `<div style="
+      background-color: ${bgColor};
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      border: 3px solid white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    ">
+      ${emoji}
+    </div>`,
+    iconSize: [40, 40],
+    iconAnchor: [20, 40],
+    popupAnchor: [0, -40],
+    className: "custom-marker",
+  });
+};
+
 export default function App() {
   // Auth state - moved to top level to fix hooks violation
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
-  const [loginEmail, setLoginEmail] = useState("admin@example.com");
+  const [loginEmail, setLoginEmail] = useState("admin@gmail.com");
   const [loginPassword, setLoginPassword] = useState("password");
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -81,6 +119,8 @@ export default function App() {
   const [toasts, setToasts] = useState<
     Array<{ id: string; message: string; type: "error" | "success" }>
   >([]);
+  // ✅ FIX #5: Track loading state for CRUD operations (NFR-LOAD-01)
+  const [operationLoading, setOperationLoading] = useState(false);
 
   // Use custom hooks for API management (with token)
   const {
@@ -115,10 +155,17 @@ export default function App() {
   }, []);
 
   // ✅ FIX #1: Auto-fetch POIs/Tours after login (FR-02.1, FR-03.1)
+  // ✅ FIX #6: Show error toast when initial fetch fails (NFR-ERR-02)
   useEffect(() => {
     if (isLoggedIn && authToken) {
-      fetchPois().catch(err => console.error("Failed to load POIs:", err));
-      fetchTours().catch(err => console.error("Failed to load Tours:", err));
+      fetchPois().catch((err) => {
+        console.error("Failed to load POIs:", err);
+        showToast("Lỗi tải danh sách POI. Vui lòng cố gắng lại.", "error");
+      });
+      fetchTours().catch((err) => {
+        console.error("Failed to load Tours:", err);
+        showToast("Lỗi tải danh sách Tour. Vui lòng cố gắng lại.", "error");
+      });
     }
   }, [isLoggedIn, authToken, fetchPois, fetchTours]);
 
@@ -133,6 +180,8 @@ export default function App() {
       return;
     }
 
+    // ✅ FIX #5: Set loading state for CRUD operation (NFR-LOAD-01)
+    setOperationLoading(true);
     try {
       await savePoi(selectedPoi);
       setIsEditingPoi(false);
@@ -145,11 +194,16 @@ export default function App() {
     } catch (error) {
       console.error(error);
       showToast("Lỗi lưu POI", "error");
+    } finally {
+      // ✅ FIX #5: Clear loading state (NFR-LOAD-01)
+      setOperationLoading(false);
     }
   };
 
   const handleDeletePoi = async (id: number) => {
     if (!confirm("Bạn có chắc chắn muốn xóa điểm này?")) return;
+    // ✅ FIX #5: Set loading state (NFR-LOAD-01)
+    setOperationLoading(true);
     try {
       await deletePoi(id);
       setSelectedPoi(null);
@@ -157,6 +211,8 @@ export default function App() {
     } catch (error) {
       console.error(error);
       showToast("Lỗi xóa POI", "error");
+    } finally {
+      setOperationLoading(false);
     }
   };
 
@@ -171,6 +227,8 @@ export default function App() {
       return;
     }
 
+    // ✅ FIX #5: Set loading state (NFR-LOAD-01)
+    setOperationLoading(true);
     try {
       await saveTour(currentTour);
       setIsCreatingTour(false);
@@ -179,17 +237,23 @@ export default function App() {
     } catch (error) {
       console.error(error);
       showToast("Lỗi lưu Tour", "error");
+    } finally {
+      setOperationLoading(false);
     }
   };
 
   const handleDeleteTour = async (id: number) => {
     if (!confirm("Bạn có chắc chắn muốn xóa tour này?")) return;
+    // ✅ FIX #5: Set loading state (NFR-LOAD-01)
+    setOperationLoading(true);
     try {
       await deleteTour(id);
       showToast("Xóa Tour thành công", "success");
     } catch (error) {
       console.error(error);
       showToast("Lỗi xóa Tour", "error");
+    } finally {
+      setOperationLoading(false);
     }
   };
 
@@ -411,7 +475,7 @@ export default function App() {
         <div className="p-6 border-t border-zinc-800">
           <button
             onClick={() => {
-              localStorage.removeItem("authToken"); 
+              localStorage.removeItem("authToken");
               setIsLoggedIn(false);
               setAuthToken(null);
             }}
@@ -439,6 +503,8 @@ export default function App() {
             <Marker
               key={poi.id}
               position={[poi.lat, poi.lng]}
+              // ✅ FIX #9: Use color-coded icon based on type and selection (FR-POI-001)
+              icon={getMarkerIcon(poi.type, selectedPoi?.id === poi.id)}
               eventHandlers={{
                 click: () => {
                   setSelectedPoi(poi);
@@ -589,9 +655,17 @@ export default function App() {
 
                 <button
                   type="submit"
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/20"
+                  disabled={operationLoading}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/20"
                 >
-                  Lưu địa điểm
+                  {operationLoading ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <LoadingSpinner />
+                      Đang lưu...
+                    </div>
+                  ) : (
+                    "Lưu địa điểm"
+                  )}
                 </button>
               </form>
             </motion.div>
@@ -679,11 +753,20 @@ export default function App() {
                 <button
                   type="submit"
                   disabled={
-                    !currentTour.title || currentTour.poi_ids?.length === 0
+                    operationLoading ||
+                    !currentTour.title ||
+                    currentTour.poi_ids?.length === 0
                   }
                   className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/20"
                 >
-                  Lưu lộ trình
+                  {operationLoading ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <LoadingSpinner />
+                      Đang lưu...
+                    </div>
+                  ) : (
+                    "Lưu lộ trình"
+                  )}
                 </button>
               </form>
             </motion.div>

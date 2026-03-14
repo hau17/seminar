@@ -10,7 +10,7 @@ const db = new Database("data.db");
 // Auth config
 const JWT_SECRET =
   process.env.JWT_SECRET || "dev-secret-key-change-in-production";
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@example.com";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@gmail.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "password";
 
 // Initialize database
@@ -37,17 +37,36 @@ async function startServer() {
 
   app.use(express.json());
 
+  // ✅ FIX #7: Add server logging middleware (NFR-LOG-01)
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on("finish", () => {
+      const duration = Date.now() - start;
+      console.log(
+        `[${new Date().toISOString()}] ${req.method} ${req.path} ${res.statusCode} ${duration}ms`,
+      );
+    });
+    next();
+  });
+
   // Middleware to check auth
   const authMiddleware = (req: any, res: any, next: any) => {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) {
+      // ✅ FIX #7: Log auth failures
+      console.log(
+        `[AUTH] Unauthorized - no token on ${req.method} ${req.path}`,
+      );
       return res.status(401).json({ error: "Unauthorized" });
     }
 
     try {
       jwt.verify(token, JWT_SECRET);
       next();
-    } catch {
+    } catch (error) {
+      console.log(
+        `[AUTH] Invalid token - ${error.message} on ${req.method} ${req.path}`,
+      );
       res.status(401).json({ error: "Invalid token" });
     }
   };
@@ -155,11 +174,37 @@ async function startServer() {
 
   app.delete("/api/pois/:id", authMiddleware, (req, res) => {
     try {
-      const id = req.params.id;
+      const id = parseInt(req.params.id);
       if (!id) {
         return res.status(400).json({ error: "POI ID không hợp lệ" });
       }
 
+      // ✅ FIX #8: BR-003 Cascade Deletion - Remove POI from all tours
+      const tours = db.prepare("SELECT id, poi_ids FROM tours").all() as Array<{
+        id: number;
+        poi_ids: string;
+      }>;
+      for (const tour of tours) {
+        const poi_ids = JSON.parse(tour.poi_ids);
+        const updated_poi_ids = poi_ids.filter((pid: number) => pid !== id);
+
+        if (updated_poi_ids.length === 0) {
+          // If no POIs left, delete the tour (cascade)
+          db.prepare("DELETE FROM tours WHERE id = ?").run(tour.id);
+          console.log(
+            `[CASCADE] Deleted tour ${tour.id} (no POIs remaining after POI ${id} removal)`,
+          );
+        } else if (updated_poi_ids.length < poi_ids.length) {
+          // Update tour with filtered poi_ids
+          db.prepare("UPDATE tours SET poi_ids = ? WHERE id = ?").run(
+            JSON.stringify(updated_poi_ids),
+            tour.id,
+          );
+          console.log(`[CASCADE] Updated tour ${tour.id}: removed POI ${id}`);
+        }
+      }
+
+      // Delete the POI
       db.prepare("DELETE FROM pois WHERE id = ?").run(id);
       res.json({ success: true });
     } catch (error) {
