@@ -1,9 +1,33 @@
-# PRD v1.0 — POI & Tour Admin Dashboard
+# PRD v1.4 — POI & Tour Admin Dashboard
 
-**Version:** 1.0  
-**Trạng thái:** Draft — Chờ xác nhận  
-**Ngày:** 2026-03-11  
-**Tác giả:** BA/PO (từ codebase review)  
+**Version:** 1.4
+**Trạng thái:** Draft — Chờ xác nhận
+**Ngày cập nhật:** 2026-03-15
+**Tác giả:** Senior BA / PO / DB Architect
+
+---
+
+### 📋 Changelog v1.3 → v1.4
+
+| #       | Hạng mục                                | Thay đổi                                                                                                                                                                                         |
+| ------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **C17** | **Audit Timestamps — Tracking dữ liệu** | **Thêm 2 trường `created_at` và `updated_at` (TEXT, DEFAULT CURRENT_TIMESTAMP) vào CẢ HAI bảng `pois` và `tours` để theo dõi thời gian tạo và chỉnh sửa dữ liệu. Phục vụ audit trail & backup.** |
+
+> Các thay đổi từ v1.0 → v1.3 vẫn còn hiệu lực. Xem changelog đầy đủ trong lịch sử tài liệu.
+
+---
+
+### 📋 Changelog v1.2 → v1.3
+
+| #       | Hạng mục                                 | Thay đổi                                                                                                                                                                                       |
+| ------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **C13** | **Tour — Bỏ kéo-thả**                    | **Loại bỏ hoàn toàn tính năng drag-to-reorder POIs trong panel Thêm/Sửa Tour. Không còn cần thư viện `@hello-pangea/dnd` hay `dnd-kit`.**                                                      |
+| **C14** | **Tour — Cơ chế sắp xếp thứ tự POI mới** | **Thứ tự POI trong Tour được xác định đơn giản bằng thứ tự click: POI click trước → vị trí 1, click sau → vị trí 2, 3... Để đổi thứ tự: bỏ chọn POI rồi click lại → POI được đẩy xuống cuối.** |
+| **C15** | **Tour — Badge thứ tự trên icon**        | **Badge số thứ tự (1, 2, 3...) hiển thị trực tiếp trên/cạnh icon của từng POI trong danh sách chọn, không phải trên badge riêng biệt.**                                                        |
+| **C16** | **Tour — Search POI trong panel**        | **Panel Thêm/Sửa Tour có thanh `🔍` tìm kiếm POI theo tên ngay trong panel để Admin dễ tìm POI muốn thêm vào tour.**                                                                           |
+
+> Các thay đổi từ v1.0 → v1.2 vẫn còn hiệu lực. Xem changelog đầy đủ trong lịch sử tài liệu.
+
 **Repo tham chiếu:** `poi-_-tour-admin-dashboard` (AI Studio App `cc7e0a12`)
 
 ---
@@ -11,15 +35,15 @@
 ## Mục lục
 
 1. [Overview & Goals](#1-overview--goals)
-2. [In-scope / Out-of-scope (MVP)](#2-in-scope--out-of-scope-mvp)
+2. [In-scope / Out-of-scope](#2-in-scope--out-of-scope-mvp)
 3. [Personas / Roles](#3-personas--roles)
 4. [Màn hình & Luồng UI](#4-màn-hình--luồng-ui)
 5. [User Stories](#5-user-stories)
 6. [Functional Requirements](#6-functional-requirements)
-7. [Acceptance Criteria (Given-When-Then)](#7-acceptance-criteria-given-when-then)
+7. [Acceptance Criteria](#7-acceptance-criteria-given-when-then)
 8. [Non-functional Requirements](#8-non-functional-requirements)
-9. [Data Requirements](#9-data-requirements)
-10. [API Assumptions](#10-api-assumptions)
+9. [Data Requirements & DB Schema](#9-data-requirements--db-schema)
+10. [API Specification](#10-api-specification)
 11. [Dependencies & Risks](#11-dependencies--risks)
 12. [Open Questions](#12-open-questions)
 13. [Future Enhancements](#13-future-enhancements)
@@ -30,16 +54,18 @@
 
 ### Bối cảnh
 
-Admin Dashboard là ứng dụng web nội bộ cho phép quản trị viên (Admin) quản lý tập trung các **điểm tham quan (POI)** và **lộ trình tour** trên bản đồ tương tác. Hệ thống phục vụ cho các hoạt động du lịch/tham quan (địa bàn hiện tại: khu vực Đà Nẵng, tọa độ trung tâm ~16.047°N, 108.206°E).
+Admin Dashboard là ứng dụng web nội bộ cho phép quản trị viên quản lý tập trung các **điểm tham quan (POI)** và **lộ trình tour** trên bản đồ tương tác. Địa bàn mặc định: **Khu phố ẩm thực Vĩnh Khánh, Quận 4, TP.HCM** (tọa độ trung tâm: `10.7570°N, 106.7000°E`, zoom 16). Giao diện sử dụng **Light mode** với bản đồ tile sáng.
 
-### Mục tiêu sản phẩm (MVP)
+Stack: React 19 + Vite 6 (frontend), Express 4 + SQLite via `better-sqlite3` (backend), Leaflet / react-leaflet (bản đồ), Tailwind CSS 4 (styling), `multer` (file upload middleware).
 
-| #   | Mục tiêu                                                                          | Đo lường thành công                           |
-| --- | --------------------------------------------------------------------------------- | --------------------------------------------- |
-| G1  | Admin có thể đăng nhập an toàn vào hệ thống                                       | Đăng nhập thành công, session hợp lệ          |
-| G2  | Admin quản lý toàn bộ POIs (CRUD) trực tiếp trên bản đồ                           | Thêm/sửa/xóa POI, dữ liệu persist qua reload  |
-| G3  | Admin phân loại POI thành major (Chính) và minor (WC, Bán vé, Gửi xe, Bến thuyền) | Mỗi POI có type đúng, hiển thị icon tương ứng |
-| G4  | Admin tạo tour từ tập hợp POIs, sắp xếp thứ tự lộ trình                           | Tour lưu được, preview đường đi trên bản đồ   |
+### Mục tiêu MVP
+
+| #   | Mục tiêu                                                                                                                                                  | Đo lường thành công                                                    |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| G1  | Admin đăng nhập an toàn                                                                                                                                   | Đăng nhập thành công, session hợp lệ                                   |
+| G2  | Admin CRUD POIs trên bản đồ: thêm qua click map **hoặc nhập tay tọa độ**, có ảnh vật lý, **tìm kiếm theo tên**, **bán kính**                              | POI lưu đúng, ảnh persist, search hoạt động                            |
+| G3  | Admin phân loại POI major/minor, tương tác map ↔ sidebar đồng bộ (**flyTo + popup**)                                                                      | Click sidebar → map bay đến POI; click marker → popup                  |
+| G4  | Admin CRUD đầy đủ Tour: tạo/sửa (**chọn và sắp thứ tự POI bằng click**)/xóa, **tìm kiếm theo tên**, ảnh vật lý, **bản đồ cô lập hoàn toàn** khi chọn tour | Tour hoạt động đúng; chọn tour ẩn toàn bộ POI/polyline không liên quan |
 
 ---
 
@@ -47,40 +73,55 @@ Admin Dashboard là ứng dụng web nội bộ cho phép quản trị viên (Ad
 
 ### ✅ In-scope
 
-- Module 1: Admin Login (email + password)
-- Module 2: POIs Management — CRUD trên bản đồ, phân loại major/minor
-- Module 3: Tours Management — tạo tour từ POIs, sắp xếp thứ tự POIs theo lộ trình
-- REST API CRUD cho POI và Tour (Express + SQLite)
-- Bản đồ tương tác (Leaflet) với tile provider CARTO Dark
+- **Module 1** — Admin Login (email + password)
+- **Module 2** — POIs Management:
+  - CRUD trên bản đồ
+  - Thêm POI bằng **2 cách: click map HOẶC nhập tay lat/lng**
+  - Phân loại major/minor (5 loại)
+  - Upload & lưu **file ảnh vật lý** (1 ảnh/POI); xóa POI → **xóa file vật lý**
+  - Trường **`radius`** (bán kính, integer, mét)
+  - **Thanh tìm kiếm POI theo tên**
+  - **Click marker map → popup chi tiết**
+  - **Click POI sidebar → map flyTo + zoom + popup**
+- **Module 3** — Tours Management:
+  - CRUD đầy đủ (Thêm + Sửa + Xóa)
+  - **Sắp xếp thứ tự POI trong Tour bằng thứ tự click** _(cập nhật v1.3 — thay thế kéo-thả)_
+  - **Thanh tìm kiếm POI ngay trong panel Thêm/Sửa Tour** _(mới v1.3)_
+  - Upload & lưu **file ảnh vật lý** (1 ảnh/Tour); xóa Tour → **xóa file vật lý**
+  - **Thanh tìm kiếm Tour theo tên**
+  - Bản đồ cô lập khi chọn tour: **ẩn toàn bộ POI markers và polyline không thuộc tour**
+- REST API với `multipart/form-data` (multer), **`fs.unlink` xóa file vật lý**
+- Giao diện Light mode, tile sáng (OpenStreetMap / CARTO Positron)
+- **DB Schema chuẩn hóa**: bảng `tour_pois`
 
 ### ❌ Out-of-scope (MVP)
 
-- Quản lý người dùng / phân quyền nhiều role
-- Upload ảnh cho POI
+- Quản lý user / phân quyền nhiều role
+- Upload nhiều ảnh (gallery) cho POI hoặc Tour
 - Export/import dữ liệu (CSV, JSON)
-- Tìm kiếm / lọc POI hoặc Tour
-- Thống kê / analytics
-- Giao diện mobile / responsive cho màn nhỏ
-- Tích hợp Gemini AI (dù package được cài, chưa sử dụng trong UI)
-- Public-facing tour viewer (chỉ có admin view)
-- Multi-language
+- ~~Tìm kiếm POI / Tour theo tên~~ _(đã rút vào In-scope)_
+- Thống kê / analytics dashboard
+- Giao diện responsive cho màn nhỏ / mobile
+- Tích hợp Gemini AI
+- Public-facing tour viewer
+- Multi-language / Dark mode toggle
+- Object storage (S3/GCS/Cloudinary) — dùng filesystem local trong MVP
+- **~~Kéo-thả (drag-to-reorder) thứ tự POI trong Tour~~** _(đã loại bỏ v1.3 — thay bằng cơ chế click)_
 
 ---
 
 ## 3. Personas / Roles
 
-### Admin (duy nhất trong MVP)
+**Duy nhất một role trong MVP: Admin**
 
-| Thuộc tính       | Mô tả                                                        |
-| ---------------- | ------------------------------------------------------------ |
-| Tên vai trò      | Admin                                                        |
-| Số lượng user    | Ít (1–5 người nội bộ)                                        |
-| Kỹ năng kỹ thuật | Trung bình — biết dùng web app, không cần kỹ năng lập trình  |
-| Nhu cầu chính    | Quản lý nhanh POIs và Tours mà không cần dùng DB trực tiếp   |
-| Thiết bị         | Desktop browser (Chrome/Edge/Firefox)                        |
-| Ngữ cảnh sử dụng | Văn phòng, trước buổi dẫn tour hoặc cập nhật dữ liệu định kỳ |
-
-> **Ghi chú:** MVP chỉ có một role Admin. Chưa có phân quyền.
+| Thuộc tính       | Mô tả                                                                               |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| Vai trò          | Admin                                                                               |
+| Số lượng         | 1–5 người nội bộ                                                                    |
+| Kỹ năng kỹ thuật | Trung bình — dùng web app, không cần kỹ năng lập trình                              |
+| Nhu cầu chính    | Quản lý POIs/Tours nhanh, có ảnh, tìm được điểm/tour dễ, tương tác bản đồ trực quan |
+| Thiết bị         | Desktop browser (Chrome / Edge / Firefox)                                           |
+| Ngữ cảnh         | Văn phòng, trước buổi dẫn tour hoặc cập nhật dữ liệu định kỳ                        |
 
 ---
 
@@ -88,76 +129,162 @@ Admin Dashboard là ứng dụng web nội bộ cho phép quản trị viên (Ad
 
 ### 4.1 Màn hình Login
 
-- Layout: centered card trên nền `zinc-950` (dark)
-- Thành phần: Logo icon (MapPin), tiêu đề "Admin Dashboard", sub-title "Quản lý POIs và Lộ trình Tour", form email + password, nút "Đăng nhập"
-- State:
-  - **Default:** form trống (hoặc prefill `admin@example.com`)
-  - **Loading:** (cần thêm) spinner trên nút submit trong khi gọi API
-  - **Error:** (cần thêm) thông báo lỗi inline khi sai credentials
+- Layout: centered card, nền trắng/xám nhạt (light mode)
+- Components: icon MapPin (emerald), tiêu đề "Admin Dashboard", form email + password, nút "Đăng nhập"
 
-### 4.2 Layout chính (sau login)
+| State   | Mô tả                                    |
+| ------- | ---------------------------------------- |
+| Default | Form, email prefill `admin@example.com`  |
+| Loading | Spinner trên nút Submit khi gọi API      |
+| Error   | Thông báo lỗi inline khi sai credentials |
 
-- **Sidebar trái (w-80):** logo "TourAdmin", nav 2 tab (POIs / Tours), danh sách dynamic, nút Đăng xuất
-- **Main area (flex-1):** bản đồ Leaflet full-height, overlay panel phải (slide-in khi edit POI hoặc tạo Tour), legend bản đồ (bottom-left)
+---
 
-### 4.3 Tab POIs
+### 4.2 Layout chính (post-login) — Light mode
 
-**Sidebar:**
+- **Nền:** trắng (`white`) / xám nhạt (`gray-50`)
+- **Sidebar trái (w-80):** nền trắng, viền xám nhạt; logo "TourAdmin"; nav 2 tab (POIs / Tours); danh sách dynamic; nút Đăng xuất
+- **Main area:** bản đồ Leaflet full-height (tile sáng); overlay panel slide-in từ phải; legend bottom-left
 
-- Header "Danh sách POIs" + badge count
-- Mỗi item: icon emoji + tên + type, nút xóa (hiện khi hover)
-- Click vào item → highlight + đồng bộ với bản đồ
+---
 
-**Bản đồ:**
+### 4.3 Tab POIs — Chi tiết
 
-- Hiển thị tất cả POI markers (Leaflet Marker)
-- Click trên marker → Popup (tên, type, description)
-- Click vào vùng trống trên bản đồ → Mở panel "Thêm POI mới" với tọa độ đã chọn
+#### Sidebar POIs
 
-**Panel Edit/Create POI (slide-in từ phải):**
+- **Header:** "Danh sách POIs" + badge count tổng số
+- **`🔍` Thanh tìm kiếm:** input text ở đầu danh sách, lọc realtime theo `name` (case-insensitive). Khi có text → chỉ hiển thị POIs khớp; khi xóa → reset toàn bộ danh sách.
+- **Mỗi item:** icon emoji (theo type) + tên + type label + thumbnail ảnh nhỏ (nếu có) + nút xóa (hiện khi hover)
+- **Click item trong sidebar:**
+  1. Item được highlight trong danh sách
+  2. Bản đồ thực hiện `flyTo([lat, lng], zoom: 18)` — bay mượt đến vị trí POI
+  3. Popup chi tiết của marker tương ứng tự động mở (tên, type, description, radius, ảnh nếu có)
 
-- Header: "Thêm POI mới" hoặc "Sửa POI"
-- Fields: Tên điểm (required), Loại điểm (select), Mô tả (textarea), Lat/Lng (read-only, auto-filled)
-- Nút: "Lưu địa điểm", X đóng panel
+#### Bản đồ — Tab POIs
 
-### 4.4 Tab Tours
+- Hiển thị tất cả POI markers (tile sáng)
+- **Click marker:** mở popup chi tiết — tên, type, description, **radius (m)**, ảnh (nếu có); popup có nút "Sửa" để mở panel Edit POI
+- **Click vùng trống** (khi không có panel nào mở): đặt marker tạm + mở panel "Thêm POI mới" với lat/lng tự động điền từ tọa độ click
 
-**Sidebar:**
+#### Panel Create / Edit POI (slide-in từ phải)
 
-- Header "Danh sách Tours" + nút "+" tạo tour
-- Mỗi tour: tên tour, chuỗi POIs theo thứ tự (badge + mũi tên ChevronRight), nút xóa (hover)
+- **Header:** "Thêm POI mới" hoặc "Sửa POI"
+- **Fields:**
 
-**Bản đồ:**
+| Field             | Type             | Required | Ghi chú                                         |
+| ----------------- | ---------------- | -------- | ----------------------------------------------- |
+| Tên điểm          | text             | ✅       | max 255 ký tự                                   |
+| Loại điểm         | select           | ✅       | Enum: Chính / WC / Bán vé / Gửi xe / Bến thuyền |
+| Mô tả             | textarea         | ❌       | Plain text                                      |
+| Vĩ độ (Lat)       | number           | ✅       | **Editable** — nhập tay hoặc từ click map       |
+| Kinh độ (Lng)     | number           | ✅       | **Editable** — nhập tay hoặc từ click map       |
+| Bán kính (Radius) | number (integer) | ❌       | Đơn vị: mét. Mặc định 0.                        |
+| Ảnh               | file input       | ❌       | `image/*`, max 5MB, lưu file vật lý             |
 
-- Tất cả tour hiển thị đường Polyline màu emerald, nét đứt
-- (Không có marker riêng cho tour — dùng lại marker POI)
+- **Luồng nhập tọa độ:**
+  - **Cách 1 — Click map:** khi panel đang mở, Admin click lên bản đồ → marker tạm di chuyển → Lat/Lng tự động cập nhật vào form
+  - **Cách 2 — Nhập tay:** Admin gõ giá trị vào ô Lat/Lng → sau khi blur, marker tạm nhảy đến vị trí tương ứng
+- **Upload ảnh:** input `file`, preview thumbnail sau khi chọn, nút ❌ xóa ảnh. Khi lưu: file upload lên `/uploads/pois/`, DB lưu tên file. **Khi xóa ảnh hoặc xóa POI: backend `fs.unlink` file vật lý.**
+- **Nút "Lưu địa điểm"** + **X** đóng panel
 
-**Panel Create Tour (slide-in từ phải):**
+| State          | Mô tả                                                    |
+| -------------- | -------------------------------------------------------- |
+| Loading save   | Spinner, nút disabled                                    |
+| Upload loading | Progress indicator (%) khi upload file                   |
+| Success        | Đóng panel, refresh danh sách, marker thật hiện trên map |
+| Error save     | Toast/inline error, giữ nguyên form                      |
+| Error upload   | Inline error trong khu vực upload, form không đóng       |
 
-- Header: "Tạo Tour mới"
-- Fields: Tên Tour (required), chọn POIs theo thứ tự (danh sách toggle, có số thứ tự)
-- Nút: "Lưu lộ trình" (disabled khi chưa có title hoặc chưa chọn POI), X đóng
+---
+
+### 4.4 Tab Tours — Chi tiết
+
+#### Sidebar Tours
+
+- **Header:** "Danh sách Tours" + nút **`+`** tạo tour
+- **`🔍` Thanh tìm kiếm:** input text lọc realtime theo `title` (case-insensitive)
+- **Mỗi tour item:**
+  - Thumbnail ảnh đại diện (nếu có)
+  - Tên tour
+  - Chuỗi POI theo thứ tự: badge tên ngắn + ChevronRight
+  - Icon **Edit** (bút) — click mở panel Sửa Tour
+  - Icon **Delete** (thùng rác) — hiện khi hover
+- **Click tour item:**
+  1. Tour được đánh dấu "selected" (highlight row)
+  2. Bản đồ **cô lập hoàn toàn**: **ẩn tất cả markers POI không thuộc tour này** + **ẩn tất cả polylines của tour khác**
+  3. **Chỉ hiển thị:** markers của các POIs thuộc tour (với số thứ tự 1, 2, 3...) + polyline kết nối (màu emerald, opacity 1.0)
+  4. Bản đồ `fitBounds` bao quanh toàn bộ POIs của tour đó
+- **Click lại tour đang selected** → deselect → trở về trạng thái mặc định (hiện tất cả)
+
+#### Bản đồ — Tab Tours
+
+| Trạng thái                 | Hiển thị                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Không có tour nào selected | Tất cả POI markers + tất cả polylines (emerald, nét đứt, opacity 0.4)                                                                                  |
+| Có tour selected           | **Chỉ markers POIs thuộc tour** (đánh số thứ tự 1/2/3) + **polyline của tour đó** (opacity 1.0, màu đậm). **Ẩn toàn bộ markers và polylines còn lại.** |
+
+#### Panel Create Tour (slide-in phải)
+
+- **Header:** "Tạo Tour mới"
+- **Upload ảnh đại diện** (file, optional): preview thumbnail, lưu file vật lý
+- **Field `title`** (required, max 255)
+- **Field `description`** (optional, textarea, max 1000 ký tự): Admin ghi chú thông tin ngắn gọn về lộ trình tour
+- **`🔍` Thanh tìm kiếm POI trong panel** _(mới v1.3)_: input text lọc realtime danh sách POI bên dưới theo tên, giúp Admin tìm nhanh POI muốn thêm
+- **Danh sách POIs để chọn — cơ chế click theo thứ tự** _(cập nhật v1.3)_:
+  - Hiển thị tất cả POIs (có thể lọc qua search)
+  - **Mỗi POI item hiển thị: icon type + tên + badge số thứ tự nếu đã chọn**
+  - **Click POI chưa chọn → POI được thêm vào cuối chuỗi, badge hiện số thứ tự tiếp theo**
+  - **Click POI đã chọn → POI bị remove khỏi chuỗi, badge biến mất, các badge phía sau tự giảm số**
+  - **Để đổi thứ tự:** Admin bỏ chọn POI cần di chuyển rồi click lại → POI được đưa xuống cuối
+  - Phần "Lộ trình đã chọn" phía trên danh sách: hiển thị chuỗi badge `[1: Tên A] → [2: Tên B] → [3: Tên C]` để Admin dễ kiểm tra thứ tự tổng thể
+- **Nút "Lưu lộ trình"** (disabled khi thiếu title hoặc chưa chọn ≥ 1 POI)
+
+#### Panel Edit Tour (slide-in phải)
+
+- **Header:** "Sửa Tour"
+- Điền sẵn: ảnh hiện tại, tên, mô tả, danh sách POIs đã chọn (hiển thị theo đúng thứ tự lưu trong DB)
+- Admin có thể:
+  - Đổi ảnh (upload file mới) hoặc xóa ảnh (backend `fs.unlink`)
+  - Sửa tên
+  - Sửa mô tả (textarea, max 1000 ký tự)
+  - **`🔍` Tìm kiếm POI trong panel** _(mới v1.3)_: lọc danh sách POI để dễ thêm/bớt
+  - **Thêm/bớt POIs bằng click** _(cập nhật v1.3)_: cơ chế giống Create — click để chọn/bỏ chọn, badge số thứ tự, bỏ chọn rồi click lại để đổi vị trí xuống cuối
+- **Nút "Lưu thay đổi"** → `PUT /api/tours/:id` → đóng panel → refresh danh sách
+
+| State   | Mô tả                                                    |
+| ------- | -------------------------------------------------------- |
+| Loading | Spinner, nút disabled                                    |
+| Success | Đóng panel, refresh, tour vừa sửa được highlight briefly |
+| Error   | Inline error, giữ nguyên form                            |
 
 ---
 
 ## 5. User Stories
 
-| ID    | Module | Là một... | Tôi muốn...                                                                    | Để...                                               | Priority |
-| ----- | ------ | --------- | ------------------------------------------------------------------------------ | --------------------------------------------------- | -------- |
-| US-01 | Login  | Admin     | Đăng nhập bằng email và password                                               | Truy cập dashboard an toàn                          | Must     |
-| US-02 | Login  | Admin     | Đăng xuất khỏi hệ thống                                                        | Bảo mật phiên làm việc                              | Must     |
-| US-03 | POI    | Admin     | Xem tất cả POIs trên bản đồ và trong danh sách sidebar                         | Nắm bắt tổng quan dữ liệu                           | Must     |
-| US-04 | POI    | Admin     | Click vào bản đồ để chọn vị trí và thêm POI mới                                | Đặt POI chính xác trên bản đồ                       | Must     |
-| US-05 | POI    | Admin     | Xem và chỉnh sửa thông tin POI đã tạo                                          | Cập nhật dữ liệu khi cần                            | Must     |
-| US-06 | POI    | Admin     | Xóa một POI                                                                    | Dọn dẹp dữ liệu không còn sử dụng                   | Must     |
-| US-07 | POI    | Admin     | Phân loại POI thành Chính hoặc các loại minor (WC, Bán vé, Gửi xe, Bến thuyền) | Phân biệt tầm quan trọng và chức năng của từng điểm | Must     |
-| US-08 | POI    | Admin     | Xem icon phân biệt cho từng loại POI                                           | Nhận diện nhanh loại điểm trên bản đồ và danh sách  | Should   |
-| US-09 | Tour   | Admin     | Xem danh sách tất cả tours hiện có                                             | Quản lý tổng quan lộ trình                          | Must     |
-| US-10 | Tour   | Admin     | Tạo tour mới bằng cách chọn POIs theo thứ tự                                   | Xây dựng lộ trình tham quan                         | Must     |
-| US-11 | Tour   | Admin     | Xem thứ tự các POIs trong tour                                                 | Kiểm tra lộ trình trước khi lưu                     | Must     |
-| US-12 | Tour   | Admin     | Xóa một tour                                                                   | Xóa lộ trình không còn sử dụng                      | Must     |
-| US-13 | Tour   | Admin     | Xem đường đi (polyline) của tour trên bản đồ                                   | Trực quan hóa lộ trình                              | Should   |
-| US-14 | POI    | Admin     | Nhận thông báo xác nhận trước khi xóa POI hoặc Tour                            | Tránh xóa nhầm dữ liệu                              | Must     |
+| ID                     | Module   | Tôi muốn...                                                                               | Để...                                                    | Priority |
+| ---------------------- | -------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------- | -------- |
+| US-01                  | Login    | Đăng nhập bằng email và password                                                          | Truy cập dashboard an toàn                               | Must     |
+| US-02                  | Login    | Đăng xuất khỏi hệ thống                                                                   | Bảo mật phiên làm việc                                   | Must     |
+| US-03                  | POI      | Xem tất cả POIs trên bản đồ sáng và sidebar                                               | Nắm bắt tổng quan                                        | Must     |
+| US-04a                 | POI      | Click bản đồ để chọn vị trí tạo POI mới                                                   | Đặt POI chính xác bằng thao tác trực quan                | Must     |
+| US-04b                 | POI      | Nhập thủ công tọa độ Lat/Lng trong form để tạo POI                                        | Tạo POI khi đã biết trước tọa độ                         | Must     |
+| US-05                  | POI      | Xem và chỉnh sửa thông tin POI (tên, loại, mô tả, ảnh, radius)                            | Cập nhật dữ liệu khi cần                                 | Must     |
+| US-06                  | POI      | Xóa một POI (kèm xóa file ảnh vật lý)                                                     | Dọn dẹp dữ liệu và storage                               | Must     |
+| US-07                  | POI      | Phân loại POI (Chính / WC / Bán vé / Gửi xe / Bến thuyền)                                 | Phân biệt chức năng từng điểm                            | Must     |
+| US-08                  | POI      | Tải lên 1 file ảnh vật lý cho POI                                                         | Minh họa trực quan                                       | Must     |
+| US-09                  | POI      | Tìm kiếm POI theo tên trong sidebar                                                       | Nhanh chóng tìm đúng điểm cần quản lý                    | Must     |
+| US-10                  | POI      | Click vào marker POI trên bản đồ để xem popup chi tiết                                    | Xem thông tin POI trực tiếp trên map                     | Must     |
+| US-11                  | POI      | Click vào POI trong sidebar → bản đồ flyTo + zoom + mở popup                              | Định vị nhanh POI trên bản đồ từ danh sách               | Must     |
+| US-12                  | POI      | Đặt bán kính (radius) cho POI                                                             | Xác định phạm vi/diện tích ảnh hưởng của điểm            | Must     |
+| US-13                  | Tour     | Xem danh sách tất cả tours                                                                | Quản lý tổng quan                                        | Must     |
+| US-14                  | Tour     | Tạo tour mới bằng cách **click chọn POIs theo thứ tự mong muốn**                          | Xây dựng lộ trình theo đúng thứ tự tham quan             | Must     |
+| US-15                  | Tour     | **Sửa tour: đổi tên, ảnh, thêm/bớt POI, điều chỉnh thứ tự POI bằng bỏ chọn rồi chọn lại** | Cập nhật lộ trình linh hoạt không cần kéo-thả            | Must     |
+| US-16                  | Tour     | Xóa một tour (kèm xóa file ảnh vật lý)                                                    | Xóa lộ trình không dùng + dọn storage                    | Must     |
+| US-17                  | Tour     | Tải lên 1 file ảnh đại diện cho tour                                                      | Nhận diện trực quan lộ trình                             | Must     |
+| US-18                  | Tour     | Click vào tour → bản đồ cô lập: chỉ POIs + polyline của tour đó                           | Kiểm tra lộ trình mà không bị rối bởi tour khác          | Must     |
+| US-19                  | Tour     | Tìm kiếm Tour theo tên trong sidebar                                                      | Nhanh chóng tìm đúng tour cần quản lý                    | Must     |
+| **US-20** _(mới v1.3)_ | Tour     | **Tìm kiếm POI theo tên ngay trong panel Thêm/Sửa Tour**                                  | **Dễ tìm POI muốn thêm khi có nhiều POI trong hệ thống** | Must     |
+| US-21                  | POI/Tour | Nhận xác nhận trước khi xóa POI hoặc Tour                                                 | Tránh xóa nhầm                                           | Must     |
 
 ---
 
@@ -165,84 +292,105 @@ Admin Dashboard là ứng dụng web nội bộ cho phép quản trị viên (Ad
 
 ### FR-01: Authentication
 
-| ID      | Requirement                                                                            |
-| ------- | -------------------------------------------------------------------------------------- |
-| FR-01.1 | Hệ thống hiển thị màn hình login khi chưa xác thực                                     |
-| FR-01.2 | Form login có field Email (type=email, required) và Password (type=password, required) |
-| FR-01.3 | Submit form gọi API xác thực; thành công → chuyển vào dashboard                        |
-| FR-01.4 | Thất bại → hiển thị thông báo lỗi inline (không redirect)                              |
-| FR-01.5 | Authentication sử dụng JWT token.                                                      |
+| ID      | Requirement                                                     |
+| ------- | --------------------------------------------------------------- |
+| FR-01.1 | Hệ thống hiển thị màn hình login (light mode) khi chưa xác thực |
+| FR-01.2 | Form login: Email (required) + Password (required)              |
+| FR-01.3 | Submit → gọi API xác thực; thành công → vào dashboard           |
+| FR-01.4 | Thất bại → thông báo lỗi inline, không redirect                 |
+| FR-01.5 | Session duy trì bằng cookie/token có TTL                        |
+| FR-01.6 | Nút Đăng xuất → xóa session → redirect login                    |
 
-Token được lưu trong localStorage để duy trì session sau khi reload trang.
-React state giữ bản copy token trong runtime để sử dụng khi gọi API.
-Mỗi request API gửi header:
-
-Authorization: Bearer <token>.|
-| FR-01.6 | Nút Đăng xuất xóa session và redirect về màn hình login |
-| FR-01.7 | Route `/` khi chưa login redirect về `/login` (hoặc conditional render) |
-| FR-01.8 |Client phải tự động đính kèm Authorization: Bearer <token> trong mọi request API sau khi đăng nhập thành công.|
+---
 
 ### FR-02: POIs Management
 
-| ID       | Requirement                                                                                                                                         |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FR-02.1  | Sau login, hệ thống tải và hiển thị toàn bộ POIs từ `GET /api/pois`                                                                                 |
-| FR-02.2  | Mỗi POI được hiển thị bằng Leaflet Marker trên bản đồ                                                                                               |
-| FR-02.3  | Click marker → Popup hiển thị name, type, description                                                                                               |
-| FR-02.4  | Danh sách sidebar hiển thị: icon emoji theo type, tên, type label                                                                                   |
-| FR-02.5  | Badge count sidebar cập nhật real-time theo số POI hiện có                                                                                          |
-| FR-02.6  | Click vào area trống trên bản đồ (tab POI đang active, không có panel edit mở) → tạo marker tạm + mở panel "Thêm POI mới" với lat/lng được điền sẵn |
-| FR-02.7  | Panel POI form có các field: `name` (text, required), `type` (select), `description` (textarea, optional), `lat`/`lng` (read-only)                  |
-| FR-02.8  | Danh sách POIType: Chính (MAIN), WC, Bán vé (TICKET), Gửi xe (PARKING), Bến thuyền (PORT)                                                           |
-| FR-02.9  | Submit form Create → `POST /api/pois` → đóng panel → refresh danh sách                                                                              |
-| FR-02.10 | Click POI trong sidebar → chọn POI đó (highlight), đồng bộ với bản đồ                                                                               |
-| FR-02.11 | Panel "Sửa POI" mở khi click nút Edit trên POI đã tồn tại (hiện tại: click trên sidebar item)                                                       |
-| FR-02.12 | Submit form Edit → `PUT /api/pois/:id` → đóng panel → refresh danh sách                                                                             |
-| FR-02.13 | Nút xóa (trash icon, hiện khi hover) trên sidebar item → hiện `confirm()` dialog → `DELETE /api/pois/:id` → refresh                                 |
-| FR-02.14 | Đóng panel (nút X) hủy thao tác, xóa marker tạm nếu đang tạo mới                                                                                    |
-| FR-02.15 | Legend bản đồ hiển thị mapping icon ↔ type cho tất cả 5 loại POI                                                                                    |
+| ID       | Requirement                                                                                                                                          |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FR-02.1  | Sau login, tải và hiển thị toàn bộ POIs từ `GET /api/pois`                                                                                           |
+| FR-02.2  | Mỗi POI hiển thị bằng Leaflet Marker trên bản đồ tile sáng                                                                                           |
+| FR-02.3  | Click marker → Popup chi tiết: tên, type, description, radius (m), ảnh (nếu có), nút "Sửa"                                                           |
+| FR-02.4  | Sidebar: icon emoji + tên + type label + thumbnail ảnh nhỏ (nếu có)                                                                                  |
+| FR-02.5  | `🔍` Thanh search ở đầu sidebar POI: lọc realtime theo name, case-insensitive; xóa text → reset                                                      |
+| FR-02.6  | Badge count cập nhật theo kết quả tìm kiếm hiện tại                                                                                                  |
+| FR-02.7  | Click POI trong sidebar → `map.flyTo([lat,lng], 18)` → popup của marker đó tự mở                                                                     |
+| FR-02.8  | Click vùng trống trên map (tab POI active, không có panel mở) → đặt marker tạm + mở panel "Thêm POI mới" với lat/lng từ click                        |
+| FR-02.9  | Panel POI form: `name` (required), `type` (select), `description` (optional), `lat` (editable), `lng` (editable), `radius` (integer ≥ 0, mặc định 0) |
+| FR-02.10 | Cách 1 — Click map khi panel đang mở: marker tạm di chuyển đến vị trí click → lat/lng trong form tự cập nhật                                         |
+| FR-02.11 | Cách 2 — Nhập tay lat/lng: Admin gõ giá trị vào ô → sau khi blur, marker tạm nhảy đến vị trí tương ứng                                               |
+| FR-02.12 | Panel có input upload ảnh: `file`, `image/*`, max 5MB, preview thumbnail, nút ❌ xóa ảnh                                                             |
+| FR-02.13 | Submit Create → multer lưu file vào `/uploads/pois/{uuid}.{ext}` → `POST /api/pois` với `image = filename` → đóng panel → refresh                    |
+| FR-02.14 | Submit Edit → nếu có ảnh mới: **`fs.unlink` file cũ** → multer lưu file mới → `PUT /api/pois/:id` → đóng panel → refresh                             |
+| FR-02.15 | Nút ❌ xóa ảnh trong panel Edit: client đánh dấu `remove_image=true` → khi lưu, backend `fs.unlink` file vật lý + set `image = NULL`                 |
+| FR-02.16 | Nút xóa POI (hover) → confirm dialog → **backend `fs.unlink` file ảnh (nếu có) → `DELETE /api/pois/:id`** → refresh                                  |
+| FR-02.17 | Xóa POI đang được dùng trong ≥ 1 tour → **server trả 409**, không xóa                                                                                |
+| FR-02.18 | Đóng panel (X) → hủy thao tác, xóa marker tạm nếu đang tạo mới                                                                                       |
+| FR-02.19 | Legend bản đồ hiển thị mapping icon ↔ type cho 5 loại POI                                                                                            |
+| FR-02.20 | Bản đồ mặc định center `[10.7570, 106.7000]`, zoom 16                                                                                                |
+
+---
 
 ### FR-03: Tours Management
 
-| ID       | Requirement                                                                                  |
-| -------- | -------------------------------------------------------------------------------------------- |
-| FR-03.1  | Sau login, hệ thống tải toàn bộ Tours từ `GET /api/tours`                                    |
-| FR-03.2  | Danh sách tour trên sidebar: tên tour + chuỗi POI theo thứ tự (badge + ChevronRight)         |
-| FR-03.3  | Nút "+" trên header sidebar → mở panel "Tạo Tour mới"                                        |
-| FR-03.4  | Panel tạo tour: field `title` (text, required) + danh sách POIs để chọn                      |
-| FR-03.5  | POI trong danh sách chọn là toggle: chọn → xếp vào cuối chuỗi, bỏ chọn → remove              |
-| FR-03.6  | POI đã chọn hiển thị badge số thứ tự (1, 2, 3…)                                              |
-| FR-03.7  | Nút "Lưu lộ trình" disabled khi `title` rỗng HOẶC chưa chọn ít nhất 1 POI                    |
-| FR-03.8  | Submit → `POST /api/tours` → đóng panel → refresh danh sách                                  |
-| FR-03.9  | Nút xóa (hover) → `confirm()` → `DELETE /api/tours/:id` → refresh                            |
-| FR-03.10 | Khi tab Tours active → bản đồ vẽ Polyline emerald nét đứt cho mỗi tour theo thứ tự `poi_ids` |
-| FR-03.11 | POI không tìm thấy trong `poi_ids` hiển thị label "Unknown" (graceful degradation)           |
+| ID                             | Requirement                                                                                                                                                                                          |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FR-03.1                        | Sau login, tải toàn bộ Tours từ `GET /api/tours`                                                                                                                                                     |
+| FR-03.2                        | Sidebar: thumbnail ảnh (nếu có) + tên + chuỗi POI theo thứ tự (badge + ChevronRight) + icon Edit + icon Delete (hover)                                                                               |
+| FR-03.3                        | `🔍` Thanh search ở đầu sidebar Tour: lọc realtime theo title, case-insensitive                                                                                                                      |
+| FR-03.4                        | Nút `+` → mở panel "Tạo Tour mới"                                                                                                                                                                    |
+| FR-03.5                        | Panel tạo/sửa tour có `upload ảnh đại diện` (optional) + `title` (required, max 255) + `description` (optional, textarea, max 1000 ký tự) + **`🔍` thanh tìm kiếm POI trong panel** + danh sách POIs |
+| **FR-03.6** _(cập nhật v1.3)_  | **Cơ chế chọn POI theo thứ tự click: click POI chưa chọn → thêm vào cuối chuỗi (position = max + 1); click POI đã chọn → remove, các position phía sau giảm 1**                                      |
+| **FR-03.7** _(cập nhật v1.3)_  | **Badge số thứ tự (1, 2, 3...) hiển thị trực tiếp trên/cạnh icon của POI trong danh sách chọn; badge ẩn khi POI chưa được chọn**                                                                     |
+| **FR-03.8** _(cập nhật v1.3)_  | **Phần "Lộ trình đã chọn" hiển thị chuỗi `[1: Tên A] → [2: Tên B] → ...` phía trên danh sách để Admin kiểm tra thứ tự tổng thể**                                                                     |
+| **FR-03.9** _(cập nhật v1.3)_  | **Để thay đổi vị trí một POI trong chuỗi: Admin click bỏ chọn POI đó → POI bị remove → click chọn lại → POI được đưa xuống cuối chuỗi; các badge tự cập nhật**                                       |
+| **FR-03.10** _(cập nhật v1.3)_ | **`🔍` Thanh search POI trong panel: lọc realtime danh sách POI theo tên, case-insensitive; POI đã chọn vẫn hiển thị badge dù có đang lọc hay không**                                                |
+| FR-03.11                       | Nút "Lưu lộ trình" / "Lưu thay đổi" disabled khi `title` rỗng hoặc chưa chọn ≥ 1 POI                                                                                                                 |
+| FR-03.12                       | Submit Create → multer lưu ảnh vào `/uploads/tours/{uuid}.{ext}` → `POST /api/tours` với `image = filename` → đóng panel → refresh                                                                   |
+| FR-03.13                       | Icon Edit trên tour item → mở panel "Sửa Tour" với dữ liệu hiện tại điền sẵn (ảnh, tên, description, POIs theo đúng thứ tự position)                                                                 |
+| FR-03.14                       | Panel Edit Tour: đổi ảnh (`fs.unlink` ảnh cũ), sửa tên, sửa description (textarea, max 1000 ký tự), thêm/bớt POI bằng click (cơ chế giống FR-03.6–FR-03.10)                                          |
+| FR-03.15                       | Submit Edit → nếu có ảnh mới: **`fs.unlink` ảnh cũ** → multer lưu ảnh mới → `PUT /api/tours/:id` → đóng panel → refresh                                                                              |
+| FR-03.16                       | Nút ❌ xóa ảnh trong panel Edit Tour: backend `fs.unlink` file vật lý + set `image = NULL`                                                                                                           |
+| FR-03.17                       | Nút xóa tour (hover) → confirm → **backend `fs.unlink` ảnh vật lý (nếu có)** → `DELETE /api/tours/:id` → refresh                                                                                     |
+| FR-03.18                       | **Mặc định (không tour nào selected):** hiển thị tất cả POI markers + tất cả polylines (opacity 0.4)                                                                                                 |
+| FR-03.19                       | **Click tour item → selected: ẩn TẤT CẢ markers POI không thuộc tour + ẩn TẤT CẢ polylines tour khác; chỉ hiện markers (đánh số) + polyline của tour này (opacity 1.0); fitBounds**                  |
+| FR-03.20                       | Click lại tour đang selected → deselect → trở về trạng thái mặc định                                                                                                                                 |
+| FR-03.21                       | POI không tìm thấy trong DB → hiển thị "Unknown" (graceful degradation)                                                                                                                              |
 
 ---
 
 ## 7. Acceptance Criteria (Given-When-Then)
 
-| US    | Scenario                 | Given                                                               | When                                      | Then                                                                                                                    |
-| ----- | ------------------------ | ------------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| US-01 | Đăng nhập thành công     | Admin ở màn hình Login, nhập đúng email và password hợp lệ          | Admin nhấn "Đăng nhập"                    | Dashboard hiển thị (sidebar + bản đồ), tab POIs được chọn mặc định                                                      |
-| US-01 | Đăng nhập thất bại       | Admin ở màn hình Login, nhập sai password                           | Admin nhấn "Đăng nhập"                    | Hiển thị thông báo lỗi inline "Sai email hoặc mật khẩu", form không bị xóa                                              |
-| US-01 | Form validation          | Admin ở màn hình Login, để trống email hoặc password                | Admin nhấn "Đăng nhập"                    | Browser/app hiển thị validation "Trường bắt buộc", không gọi API                                                        |
-| US-02 | Đăng xuất                | Admin đang ở Dashboard                                              | Admin nhấn "Đăng xuất"                    | Session bị xóa, màn hình chuyển về Login                                                                                |
-| US-03 | Load POIs                | Admin vừa đăng nhập thành công                                      | Dashboard render xong                     | Tất cả POIs từ DB hiển thị trên bản đồ và trong danh sách sidebar                                                       |
-| US-04 | Tạo POI qua click bản đồ | Admin ở tab POIs, không có panel nào đang mở                        | Admin click vào vị trí trống trên bản đồ  | Marker tạm xuất hiện tại vị trí đó, panel "Thêm POI mới" slide-in từ phải, Lat/Lng được điền sẵn, đọc-only              |
-| US-04 | Lưu POI mới              | Panel "Thêm POI mới" đang mở, Admin đã nhập đầy đủ tên và chọn loại | Admin nhấn "Lưu địa điểm"                 | POI được lưu vào DB, marker thật xuất hiện trên bản đồ, panel đóng, danh sách sidebar cập nhật, badge count tăng        |
-| US-04 | Hủy tạo POI              | Panel "Thêm POI mới" đang mở                                        | Admin nhấn nút X                          | Panel đóng, marker tạm biến mất, không có dữ liệu được lưu                                                              |
-| US-05 | Sửa POI                  | Admin click chọn một POI trong danh sách sidebar                    | —                                         | POI được highlight, (khi click nút Edit) panel "Sửa POI" mở với dữ liệu hiện tại điền sẵn                               |
-| US-05 | Lưu POI đã sửa           | Panel "Sửa POI" đang mở, Admin thay đổi tên                         | Admin nhấn "Lưu địa điểm"                 | Dữ liệu được cập nhật trong DB, danh sách sidebar và popup bản đồ phản ánh thay đổi                                     |
-| US-06 | Xóa POI                  | Admin hover vào POI item trong sidebar                              | Admin click icon Trash                    | Hiện dialog "Bạn có chắc chắn muốn xóa điểm này?"; nếu xác nhận → POI bị xóa khỏi DB và khỏi bản đồ, danh sách cập nhật |
-| US-06 | Hủy xóa POI              | Dialog xác nhận xóa đang hiện                                       | Admin click "Cancel"                      | Dialog đóng, POI vẫn tồn tại                                                                                            |
-| US-07 | Phân loại POI            | Panel tạo/sửa POI đang mở                                           | Admin chọn loại từ dropdown               | Icon tương ứng (📍/🚻/🎫/🅿️/⚓) hiển thị trong danh sách sidebar và legend bản đồ                                       |
-| US-10 | Tạo Tour mới             | Admin ở tab Tours, nhấn "+"                                         | —                                         | Panel "Tạo Tour mới" slide-in, danh sách toàn bộ POIs hiển thị để chọn                                                  |
-| US-10 | Chọn POIs cho tour       | Panel tạo tour đang mở, có POIs trong hệ thống                      | Admin click lần lượt vào POI A, rồi POI B | POI A có badge "1", POI B có badge "2", cả hai highlight màu emerald                                                    |
-| US-10 | Lưu tour                 | Panel tạo tour, đã nhập tên và chọn ít nhất 1 POI                   | Admin nhấn "Lưu lộ trình"                 | Tour được lưu vào DB, panel đóng, tour xuất hiện trong danh sách sidebar, polyline đường đi xuất hiện trên bản đồ       |
-| US-10 | Nút lưu disabled         | Panel tạo tour đang mở, chưa nhập tên hoặc chưa chọn POI            | —                                         | Nút "Lưu lộ trình" bị disabled (không clickable)                                                                        |
-| US-12 | Xóa Tour                 | Admin hover vào tour item trong sidebar                             | Admin click icon Trash                    | Hiện dialog xác nhận; nếu xác nhận → tour xóa khỏi DB, danh sách cập nhật, polyline biến mất                            |
-| US-13 | Xem polyline tour        | Admin chuyển sang tab Tours                                         | —                                         | Mỗi tour hiển thị đường polyline màu emerald (#10b981), nét đứt, kết nối các POI theo đúng thứ tự `poi_ids`             |
+| US                          | Scenario                                      | Given                                                                                            | When                                                            | Then                                                                                                                          |
+| --------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| US-01                       | Đăng nhập thành công                          | Admin ở màn Login, nhập đúng credentials                                                         | Nhấn "Đăng nhập"                                                | Dashboard light mode hiển thị, bản đồ center Vĩnh Khánh Q4 zoom 16, tab POIs active                                           |
+| US-01                       | Đăng nhập thất bại                            | Admin nhập sai password                                                                          | Nhấn "Đăng nhập"                                                | Lỗi inline "Sai email hoặc mật khẩu", form giữ nguyên                                                                         |
+| US-04a                      | Tạo POI — click map                           | Tab POIs active, không có panel mở                                                               | Admin click vị trí trên map                                     | Marker tạm xuất hiện; panel "Thêm POI mới" slide-in; Lat/Lng điền từ tọa độ click                                             |
+| US-04b                      | Tạo POI — nhập tay tọa độ                     | Panel "Thêm POI mới" đang mở                                                                     | Admin xóa Lat/Lng hiện tại và gõ `10.755, 106.702`              | Marker tạm nhảy đến tọa độ vừa nhập; nếu giá trị ngoài range thì hiển thị lỗi inline                                          |
+| US-04b                      | Cập nhật marker khi gõ tọa độ                 | Panel đang mở, Admin đã nhập Lat mới                                                             | Admin blur khỏi ô Lat                                           | Marker tạm di chuyển đến vĩ độ mới, Lng giữ nguyên                                                                            |
+| US-09                       | Search POI theo tên                           | Tab POIs, sidebar hiển thị 10 POIs                                                               | Admin gõ "Bến" vào thanh search                                 | Sidebar chỉ hiển thị POIs tên chứa "Bến"; badge count cập nhật; map vẫn hiện tất cả markers                                   |
+| US-09                       | Xóa search POI                                | Đang có text trong search bar                                                                    | Admin xóa hết text                                              | Danh sách reset, hiện toàn bộ POIs, badge count về số ban đầu                                                                 |
+| US-10                       | Click marker → popup chi tiết                 | Tab POIs active, map có POI markers                                                              | Admin click marker "Cổng chính"                                 | Popup mở: tên, type, description, radius (m), ảnh (nếu có), nút "Sửa"                                                         |
+| US-10                       | Nút "Sửa" trong popup                         | Popup POI đang mở                                                                                | Admin nhấn nút "Sửa"                                            | Popup đóng; panel "Sửa POI" slide-in với dữ liệu POI điền sẵn                                                                 |
+| US-11                       | Click sidebar → flyTo + popup                 | Tab POIs active, map đang zoom xa                                                                | Admin click item "Bến thuyền A" trong sidebar                   | Map flyTo([lat,lng], 18) animation mượt; popup của marker tự mở; item highlight trong sidebar                                 |
+| US-12                       | Thêm radius cho POI                           | Panel "Thêm POI mới" đang mở                                                                     | Admin nhập 50 vào trường "Bán kính (m)"                         | Khi lưu, DB `radius = 50`; popup hiển thị "Bán kính: 50m"                                                                     |
+| US-12                       | Radius không hợp lệ                           | Panel POI mở                                                                                     | Admin nhập -10 hoặc ký tự chữ                                   | Validation inline "Bán kính phải là số nguyên ≥ 0"; nút Lưu disabled                                                          |
+| US-06                       | Xóa POI — xóa file vật lý                     | POI "Cổng A" có ảnh `/uploads/pois/abc.jpg`                                                      | Admin click Trash → xác nhận                                    | Server `fs.unlink('/uploads/pois/abc.jpg')`; record xóa khỏi DB; marker biến mất                                              |
+| US-06                       | Xóa POI đang trong Tour                       | POI "Bến X" đang thuộc "Tour 1"                                                                  | Admin click Trash → xác nhận                                    | Server trả 409 "POI đang được dùng trong Tour: Tour 1"; file ảnh không bị xóa; POI giữ nguyên                                 |
+| US-08                       | Upload ảnh POI hợp lệ                         | Panel POI mở                                                                                     | Admin chọn file JPG 2MB                                         | Thumbnail preview hiển thị; khi lưu, file lưu vào `/uploads/pois/`, DB lưu tên file                                           |
+| US-08                       | Upload ảnh vượt 5MB                           | Panel POI mở                                                                                     | Admin chọn file 8MB                                             | Lỗi "Ảnh không được vượt quá 5MB", file từ chối                                                                               |
+| US-08                       | Xóa ảnh POI — xóa file vật lý                 | Panel "Sửa POI" mở, POI có ảnh                                                                   | Admin nhấn ❌ xóa ảnh → nhấn "Lưu"                              | Server `fs.unlink` file; DB set `image = NULL`; popup và sidebar không còn hiện ảnh                                           |
+| **US-14** _(cập nhật v1.3)_ | **Chọn POI theo thứ tự click — tạo tour mới** | **Panel "Tạo Tour mới" mở, hệ thống có POIs: A, B, C, D**                                        | **Admin click POI "C" → rồi click POI "A" → rồi click POI "D"** | **Chuỗi "Lộ trình đã chọn" hiển thị `[1: C] → [2: A] → [3: D]`; badge "1" trên icon C, "2" trên A, "3" trên D**               |
+| **US-14** _(cập nhật v1.3)_ | **Bỏ chọn POI — badge tự cập nhật**           | **Panel tạo tour, chuỗi đang là `[1: C] → [2: A] → [3: D]`**                                     | **Admin click POI "A" để bỏ chọn**                              | **Chuỗi cập nhật thành `[1: C] → [2: D]`; badge "A" biến mất; badge "D" đổi từ 3 → 2**                                        |
+| **US-15** _(cập nhật v1.3)_ | **Đổi vị trí POI bằng bỏ chọn + chọn lại**    | **Panel "Sửa Tour" mở, chuỗi đang là `[1: A] → [2: B] → [3: C]`. Admin muốn đưa "A" xuống cuối** | **Admin click "A" để bỏ chọn → click "A" để chọn lại**          | **Chuỗi cập nhật thành `[1: B] → [2: C] → [3: A]`; polyline preview trên map cập nhật theo thứ tự mới**                       |
+| **US-15** _(cập nhật v1.3)_ | **Lưu Tour sau khi chỉnh thứ tự**             | **Chuỗi là `[1: B] → [2: C] → [3: A]`**                                                          | **Admin nhấn "Lưu thay đổi"**                                   | **`PUT /api/tours/:id` với `poi_ids=[B,C,A]`; panel đóng; sidebar hiển thị chuỗi B→C→A**                                      |
+| US-15                       | Mở panel Sửa Tour                             | Danh sách có ≥ 1 tour                                                                            | Admin click icon Edit                                           | Panel "Sửa Tour" slide-in, điền sẵn ảnh, tên, POIs theo đúng thứ tự đã lưu                                                    |
+| **US-20** _(mới v1.3)_      | **Search POI trong panel Tour**               | **Panel "Tạo Tour mới" mở, hệ thống có 15 POIs**                                                 | **Admin gõ "Bến" vào thanh search trong panel**                 | **Danh sách POI trong panel thu hẹn, chỉ hiện POIs tên chứa "Bến"; POIs đã chọn vẫn hiện badge thứ tự dù đang lọc hay không** |
+| **US-20** _(mới v1.3)_      | **Xóa search trong panel**                    | **Đang lọc "Bến" trong panel tour**                                                              | **Admin xóa text search**                                       | **Danh sách POI reset, hiện toàn bộ; POIs đã chọn vẫn có badge**                                                              |
+| US-16                       | Xóa Tour — xóa file ảnh vật lý                | Tour "Tour Ẩm Thực" có ảnh `/uploads/tours/def.jpg`                                              | Admin click Trash → xác nhận                                    | Server `fs.unlink('/uploads/tours/def.jpg')`; record xóa; polyline biến mất                                                   |
+| US-19                       | Search Tour theo tên                          | Sidebar Tours có 5 tours                                                                         | Admin gõ "Ẩm thực" vào thanh search                             | Sidebar chỉ hiển thị tours tên chứa "Ẩm thực"                                                                                 |
+| US-18                       | Cô lập hoàn toàn khi chọn tour                | 3 tours trên map, mỗi tour có 3 POIs                                                             | Admin click "Tour Vĩnh Khánh"                                   | Chỉ hiện 3 markers của Tour Vĩnh Khánh (đánh số 1/2/3) + polyline. TẤT CẢ markers và polylines khác BỊ ẨN. Map fitBounds      |
+| US-18                       | Bỏ chọn tour                                  | Tour đang selected                                                                               | Admin click lại tour đó                                         | Deselect; tất cả markers và polylines hiện lại                                                                                |
+| US-21                       | Xóa POI — confirm                             | Admin hover POI item                                                                             | Click Trash                                                     | Dialog confirm; Cancel → không xóa; OK → xóa                                                                                  |
 
 ---
 
@@ -250,148 +398,412 @@ Authorization: Bearer <token>.|
 
 ### 8.1 Authentication & Security
 
-- **NFR-SEC-01:** Tất cả API endpoints (/api/pois, /api/tours) phải yêu cầu Bearer token hợp lệ. Server validate JWT trước khi xử lý request.
-- **NFR-SEC-02:** Password không được lưu plaintext trong DB; phải hash (bcrypt hoặc tương đương)
-- **NFR-SEC-03:** Session/token có thời gian hết hạn (tối thiểu: 8 giờ, tối đa: 24 giờ)
-- **NFR-SEC-04:** HTTPS bắt buộc trên môi trường production
-- **NFR-SEC-05:** Khi token hết hạn (401 Unauthorized), client phải redirect về màn hình login.
+| ID         | Requirement                                                                                                   |
+| ---------- | ------------------------------------------------------------------------------------------------------------- |
+| NFR-SEC-01 | API endpoints `/api/pois`, `/api/tours`, `/api/upload`, `/uploads/*` phải yêu cầu xác thực                    |
+| NFR-SEC-02 | Password lưu hash (bcrypt); không lưu plaintext                                                               |
+| NFR-SEC-03 | Session/token TTL: min 8h, max 24h                                                                            |
+| NFR-SEC-04 | HTTPS bắt buộc trên production                                                                                |
+| NFR-SEC-05 | File upload validate MIME type server-side (multer `fileFilter`): chỉ `image/jpeg`, `image/png`, `image/webp` |
+| NFR-SEC-06 | Static file serving `/uploads/*` chỉ khả dụng khi đã xác thực (không public)                                  |
 
 ### 8.2 Validation
 
-- **NFR-VAL-01:** `name` của POI: required, không được rỗng hoặc chỉ có whitespace, max 255 ký tự
-- **NFR-VAL-02:** `type` của POI: phải là một trong 5 giá trị enum hợp lệ
-- **NFR-VAL-03:** `lat` phải trong khoảng [-90, 90]; `lng` trong khoảng [-180, 180]
-- **NFR-VAL-04:** `title` của Tour: required, không được rỗng, max 255 ký tự
-- **NFR-VAL-05:** `poi_ids` của Tour: phải là array, ít nhất 1 phần tử, mỗi phần tử phải là ID tồn tại trong bảng `pois`
-- **NFR-VAL-06:** Validation phải xảy ra cả phía client (UX) và server (đảm bảo data integrity)
+| ID         | Requirement                                                                                           |
+| ---------- | ----------------------------------------------------------------------------------------------------- |
+| NFR-VAL-01 | `name` POI: required, không rỗng/whitespace, max 255 ký tự                                            |
+| NFR-VAL-02 | `type` POI: một trong 5 enum hợp lệ                                                                   |
+| NFR-VAL-03 | `lat` ∈ [-90, 90]; `lng` ∈ [-180, 180] — validate cả client lẫn server                                |
+| NFR-VAL-04 | `radius`: số nguyên (INTEGER) ≥ 0; default 0 nếu không nhập; từ chối nếu âm hoặc không phải số nguyên |
+| NFR-VAL-05 | `title` Tour: required, max 255 ký tự                                                                 |
+| NFR-VAL-06 | `poi_ids` Tour: ≥ 1 phần tử; mỗi ID phải tồn tại trong bảng `pois`                                    |
+| NFR-VAL-07 | File ảnh: max 5MB; chỉ JPEG/PNG/WebP — validate client + server                                       |
+| NFR-VAL-08 | Validation xảy ra cả client (UX) và server (integrity)                                                |
 
-### 8.3 Error Handling
+### 8.3 Error Handling & File Cleanup
 
-- **NFR-ERR-01:** Mọi API call lỗi (4xx/5xx) phải hiển thị thông báo lỗi rõ ràng cho user (toast hoặc inline message), không để lỗi im lặng
-- **NFR-ERR-02:** Khi fetch POIs/Tours thất bại → hiển thị trạng thái empty với thông báo lỗi thay vì danh sách trống
-- **NFR-ERR-03:** Xóa POI đang được sử dụng trong Tour → server trả lỗi có ý nghĩa (hoặc xử lý cascade)
+| ID         | Requirement                                                                                                                |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------- |
+| NFR-ERR-01 | Mọi API 4xx/5xx hiển thị thông báo rõ ràng (toast/inline)                                                                  |
+| NFR-ERR-02 | Fetch POIs/Tours thất bại → empty state + thông báo                                                                        |
+| NFR-ERR-03 | Xóa POI đang trong Tour → 409 với tên các tour liên quan                                                                   |
+| NFR-ERR-04 | Upload ảnh thất bại → inline error, panel không đóng                                                                       |
+| NFR-ERR-05 | Nếu `fs.unlink` thất bại (file không tồn tại), server log cảnh báo nhưng KHÔNG trả lỗi cho client — tiếp tục xóa record DB |
+| NFR-ERR-06 | Nếu DB delete thành công nhưng `fs.unlink` thất bại → log lỗi để admin biết file orphan; không rollback DB                 |
 
 ### 8.4 Loading States
 
-- **NFR-LOAD-01:** Các thao tác async (fetch, save, delete) phải có visual feedback (spinner/loading indicator)
-- **NFR-LOAD-02:** Nút submit bị disabled trong khi đang gọi API (tránh double-submit)
+| ID          | Requirement                                             |
+| ----------- | ------------------------------------------------------- |
+| NFR-LOAD-01 | Fetch/save/delete có visual feedback (spinner/skeleton) |
+| NFR-LOAD-02 | Nút submit disabled khi đang gọi API                    |
+| NFR-LOAD-03 | Upload ảnh hiển thị progress indicator (%)              |
 
 ### 8.5 Performance
 
-- **NFR-PERF-01:** Tải trang lần đầu (sau login) < 3s trên kết nối 10 Mbps
-- **NFR-PERF-02:** Thao tác CRUD (save/delete) phản hồi < 1s trong điều kiện bình thường
-- **NFR-PERF-03:** Bản đồ render và responsive tới click trong < 2s
+| ID          | Requirement                                                              |
+| ----------- | ------------------------------------------------------------------------ |
+| NFR-PERF-01 | Tải trang lần đầu < 3s / 10 Mbps                                         |
+| NFR-PERF-02 | CRUD phản hồi < 1s                                                       |
+| NFR-PERF-03 | Map render < 2s                                                          |
+| NFR-PERF-04 | Upload ≤ 5MB hoàn thành < 5s / 10 Mbps                                   |
+| NFR-PERF-05 | Search/filter POI và Tour phản hồi realtime < 100ms (client-side filter) |
 
 ### 8.6 Logging
 
-- **NFR-LOG-01:** Server log tất cả requests với timestamp, method, path, status code
-- **NFR-LOG-02:** Lỗi server phải được log với stack trace (không expose stack trace ra response)
+| ID         | Requirement                                                     |
+| ---------- | --------------------------------------------------------------- |
+| NFR-LOG-01 | Server log: timestamp, method, path, status code                |
+| NFR-LOG-02 | Lỗi server log với stack trace; không expose ra response        |
+| NFR-LOG-03 | Log mọi thao tác `fs.unlink`: path file, kết quả (success/fail) |
 
 ---
 
-## 9. Data Requirements
+## 9. Data Requirements & DB Schema
 
-### 9.1 POI
+### 9.1 Bảng `pois`
 
-| Field         | Type    | Required | Constraints                                           | Ghi chú                      |
-| ------------- | ------- | -------- | ----------------------------------------------------- | ---------------------------- |
-| `id`          | INTEGER | Auto     | PK, AUTOINCREMENT                                     | Sinh tự động                 |
-| `name`        | TEXT    | ✅       | NOT NULL, max 255                                     | Tên hiển thị của điểm        |
-| `type`        | TEXT    | ✅       | Enum: `Chính`, `WC`, `Bán vé`, `Gửi xe`, `Bến thuyền` | Từ `POIType` enum            |
-| `lat`         | REAL    | ✅       | NOT NULL, [-90, 90]                                   | Vĩ độ, lấy từ click bản đồ   |
-| `lng`         | REAL    | ✅       | NOT NULL, [-180, 180]                                 | Kinh độ, lấy từ click bản đồ |
-| `description` | TEXT    | ❌       | Nullable                                              | Mô tả tự do                  |
+```sql
+CREATE TABLE pois (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT    NOT NULL,                   -- Tên POI, max 255
+  type        TEXT    NOT NULL,                   -- Enum: 'Chính'|'WC'|'Bán vé'|'Gửi xe'|'Bến thuyền'
+  lat         REAL    NOT NULL,                   -- [-90, 90]
+  lng         REAL    NOT NULL,                   -- [-180, 180]
+  description TEXT,                              -- Nullable, plain text
+  radius      INTEGER NOT NULL DEFAULT 0,        -- Bán kính (mét), ≥ 0
+  image       TEXT,                              -- Tên file vật lý (VD: 'abc123.jpg')
+                                                 -- NULL nếu không có ảnh
+                                                 -- File lưu tại: /uploads/pois/{image}
+  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- Ngày/giờ tạo POI (ISO8601 format)
+  updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP   -- Ngày/giờ chỉnh sửa lần cuối (ISO8601 format)
+);
+```
+
+> **Ghi chú:** Cột `image` chỉ lưu **tên file** (VD: `abc123.jpg`). URL đầy đủ tổng hợp runtime: `${BASE_URL}/uploads/pois/${image}`.
 
 **Icon mapping:**
 
-| Type                | Emoji | Tiếng Việt             |
-| ------------------- | ----- | ---------------------- |
-| `Chính` (MAIN)      | 📍    | Điểm chính / Major POI |
-| `WC`                | 🚻    | Nhà vệ sinh            |
-| `Bán vé` (TICKET)   | 🎫    | Điểm bán vé            |
-| `Gửi xe` (PARKING)  | 🅿️    | Bãi đỗ xe              |
-| `Bến thuyền` (PORT) | ⚓    | Bến thuyền             |
-
-### 9.2 Tour
-
-| Field     | Type    | Required | Constraints       | Ghi chú                                                          |
-| --------- | ------- | -------- | ----------------- | ---------------------------------------------------------------- |
-| `id`      | INTEGER | Auto     | PK, AUTOINCREMENT | Sinh tự động                                                     |
-| `title`   | TEXT    | ✅       | NOT NULL, max 255 | Tên lộ trình                                                     |
-| `poi_ids` | TEXT    | ✅       | NOT NULL          | JSON array of POI IDs, thứ tự = thứ tự lộ trình. VD: `[1, 3, 2]` |
-
-> **Lưu ý thiết kế DB:** `poi_ids` đang lưu dạng JSON string trong SQLite. Điều này hoạt động nhưng không tối ưu cho truy vấn phức tạp. Xem Open Questions về việc chuẩn hóa.
+| `type`       | Emoji | Ý nghĩa              |
+| ------------ | ----- | -------------------- |
+| `Chính`      | 📍    | Điểm tham quan chính |
+| `WC`         | 🚻    | Nhà vệ sinh          |
+| `Bán vé`     | 🎫    | Điểm bán vé          |
+| `Gửi xe`     | 🅿️    | Bãi đỗ xe            |
+| `Bến thuyền` | ⚓    | Bến thuyền           |
 
 ---
 
-## 10. API Assumptions
+### 9.2 Bảng `tours`
 
-> Mô tả interface API cần có. Không bao gồm implementation chi tiết.
+```sql
+CREATE TABLE tours (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT    NOT NULL,                  -- Tên tour, max 255
+  description TEXT,                              -- Mô tả lộ trình (optional), max 1000 ký tự
+  image       TEXT,                              -- Tên file ảnh đại diện (VD: 'tour_xyz.png')
+                                                 -- NULL nếu không có ảnh
+                                                 -- File lưu tại: /uploads/tours/{image}
+  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- Ngày/giờ tạo Tour (ISO8601 format)
+  updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP   -- Ngày/giờ chỉnh sửa lần cuối (ISO8601 format)
+);
+```
+
+---
+
+### 9.3 Bảng `tour_pois` — NƠI DUY NHẤT lưu trữ quan hệ Tour ↔ POI
+
+```sql
+CREATE TABLE tour_pois (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  tour_id  INTEGER NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
+  poi_id   INTEGER NOT NULL REFERENCES pois(id),
+  position INTEGER NOT NULL,  -- Thứ tự trong tour, bắt đầu từ 1
+                              -- Xác định bởi thứ tự click chọn của Admin
+  UNIQUE (tour_id, position)  -- Mỗi vị trí trong tour chỉ có 1 POI
+);
+
+-- Index để query nhanh
+CREATE INDEX idx_tour_pois_tour ON tour_pois(tour_id, position);
+CREATE INDEX idx_tour_pois_poi ON tour_pois(poi_id);
+```
+
+> **⚠️ Chuẩn hóa DB:** ✅ Bảng `tour_pois` là **NƠI DUY NHẤT** lưu trữ thông tin quan hệ giữa Tour và POI. Bảng `tours` **KHÔNG** chứa cột `poi_ids` (đã loại bỏ hoàn toàn để tránh dư thừa dữ liệu). Khi query POIs của một Tour, Backend phải dùng **JOIN** giữa `tours` → `tour_pois` → `pois` với `ORDER BY position ASC`.
+
+> **Cơ chế `position`:** Khi Admin click chọn POIs theo thứ tự, frontend gửi `poi_ids = [id1, id2, id3]` theo đúng thứ tự click. Backend INSERT vào `tour_pois` với `position = index + 1` (tuyệt đối KHÔNG lưu mảy này vào cột nào của bảng `tours`). Khi Admin bỏ chọn POI giữa chuỗi, frontend tự re-index lại mảy trước khi gửi.
+
+**Lý do dùng bảng quan hệ thay JSON/array trong tours:**
+
+- ✅ Đảm bảo referential integrity (FK constraint) — POI phải tồn tại trong bảng `pois`
+- ✅ Query linh hoạt: lấy tất cả POI theo tour, hoặc tất cả tour chứa 1 POI
+- ✅ Cập nhật thứ tự dễ dàng (UPDATE position hoặc DELETE + re-INSERT)
+- ✅ Dễ kiểm tra POI đang dùng trong Tour nào để block DELETE
+- ✅ **Tuân thủ chuẩn hóa DB (3NF)** — tránh dư thừa dữ liệu (data redundancy)
+
+---
+
+### 9.4 Migration từ schema cũ
+
+```sql
+-- Bước 1: Thêm cột mới vào pois
+ALTER TABLE pois ADD COLUMN radius INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pois ADD COLUMN image TEXT;
+-- Migrate data nếu có image_url cũ:
+UPDATE pois SET image = SUBSTR(image_url, INSTR(image_url, '/pois/') + 6)
+  WHERE image_url IS NOT NULL;
+
+-- Bước 2: Tạo bảng tour_pois
+CREATE TABLE tour_pois (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tour_id INTEGER NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
+  poi_id INTEGER NOT NULL REFERENCES pois(id),
+  position INTEGER NOT NULL,
+  UNIQUE (tour_id, poi_id),
+  UNIQUE (tour_id, position)
+);
+CREATE INDEX idx_tour_pois_tour ON tour_pois(tour_id, position);
+
+-- Bước 3: Migrate poi_ids JSON → tour_pois
+-- (Dùng script Node.js: parse JSON, INSERT từng row với position = index + 1)
+
+-- Bước 4: Thêm cột description vào tours (mới v1.3)
+ALTER TABLE tours ADD COLUMN description TEXT;
+-- description tạm NULL cho các tour hiện tại, admin có thể sửa sau
+
+-- Bước 5: Thêm cột image vào tours
+ALTER TABLE tours ADD COLUMN image TEXT;
+UPDATE tours SET image = SUBSTR(image_url, INSTR(image_url, '/tours/') + 7)
+  WHERE image_url IS NOT NULL;
+
+-- Bước 6: Xóa cột poi_ids khỏi tours (chuẩn hóa DB v1.3)
+-- ⚠️ SQLite không hỗ trợ DROP COLUMN, cần recreate table:
+-- CREATE TABLE tours_new (...) WITHOUT poi_ids column
+-- INSERT INTO tours_new SELECT id, title, description, image FROM tours
+-- DROP TABLE tours
+-- ALTER TABLE tours_new RENAME TO tours
+-- (Hoặc dùng tool migration như Prisma, Alembic)
+
+-- Bước 7: Xóa cột image_url cũ (nếu có)
+-- (Tương tự như Bước 6: recreate table)
+
+-- Bước 8: Thêm audit timestamps vào pois (mới v1.4)
+ALTER TABLE pois ADD COLUMN created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE pois ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;
+COMMENT: SQLite tự động gán CURRENT_TIMESTAMP cho các record hiện tại
+COMMENT: Các record mới sẽ tự động nhận timestamp hiện tại
+
+-- Bước 9: Thêm audit timestamps vào tours (mới v1.4)
+ALTER TABLE tours ADD COLUMN created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE tours ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;
+COMMENT: SQLite tự động gán CURRENT_TIMESTAMP cho các record hiện tại
+COMMENT: Các record mới sẽ tự động nhận timestamp hiện tại
+```
+
+---
+
+### 9.5 Quy ước lưu file ảnh vật lý
+
+| Thuộc tính          | Quy định                                                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Định dạng chấp nhận | JPEG, PNG, WebP                                                                                                                              |
+| Kích thước tối đa   | 5 MB/file                                                                                                                                    |
+| Số lượng            | 1 ảnh/POI, 1 ảnh/Tour                                                                                                                        |
+| Thư mục POI         | `/uploads/pois/`                                                                                                                             |
+| Thư mục Tour        | `/uploads/tours/`                                                                                                                            |
+| Đặt tên file        | `{uuid_v4}.{ext}` — tránh conflict                                                                                                           |
+| Cột DB lưu          | Chỉ tên file (VD: `a1b2c3.jpg`), **không lưu path đầy đủ**                                                                                   |
+| URL trả về API      | `${BASE_URL}/uploads/pois/{filename}` (tổng hợp runtime)                                                                                     |
+| **Xóa file**        | **`fs.unlink(path.join(__dirname, 'uploads', folder, filename))` — bắt buộc khi: (1) xóa POI/Tour, (2) thay ảnh mới, (3) user nhấn xóa ảnh** |
+
+---
+
+## 10. API Specification
+
+> **Content-Type:** Các endpoint CREATE/UPDATE dùng `multipart/form-data` (multer). GET/DELETE dùng JSON.
 
 ### 10.1 Authentication
 
 ```
 POST /api/auth/login
-  Body: { email: string, password: string }
-  Response 200: { token: string, expiresAt: ISO8601 }
-  Response 401: { error: "Invalid credentials" }
+  Content-Type: application/json
+  Body:   { email: string, password: string }
+  200:    { token: string, expiresAt: ISO8601 }
+  401:    { error: "Invalid credentials" }
 
 POST /api/auth/logout
-  Auth: Bearer token
-  Response 200: { success: true }
+  Authorization: Bearer <token>
+  200:    { success: true }
 ```
 
-Quyết định kỹ thuật: Sử dụng JWT Token lưu tại localStorage. Mọi API gọi lên backend (POST, PUT, DELETE) đều bắt buộc phải đính kèm header Authorization: Bearer <token>.
+---
 
 ### 10.2 POIs
 
 ```
 GET /api/pois
-  Auth: Bearer token
-  Response 200: POI[]
-
-POST /api/pois
-  Auth: Bearer token
-  Body: { name, type, lat, lng, description? }
-  Response 201: { id: number }
-  Response 400: { error: string } — validation failure
-
-PUT /api/pois/:id
-  Auth: Bearer token
-  Body: { name, type, lat, lng, description? }
-  Response 200: { success: true }
-  Response 404: { error: "POI not found" }
-
-DELETE /api/pois/:id
-  Auth: Bearer token
-  Response 200: { success: true }
-  Response 404: { error: "POI not found" }
-  Response 409: { error: "POI is used in tours" } — nếu enforce constraint
+  Authorization: Bearer <token>
+  Query params:  ?search=<text>  (optional)
+  200:    POI[]
+  -- Mỗi POI object:
+  -- { id, name, type, lat, lng, description, radius, image,
+  --   created_at: ISO8601 timestamp (VD: "2026-03-15T10:30:45.000Z"),
+  --   updated_at: ISO8601 timestamp,
+  --   image_url: `${BASE_URL}/uploads/pois/${image}` | null }
 ```
+
+```
+POST /api/pois
+  Authorization: Bearer <token>
+  Content-Type:  multipart/form-data
+  Body fields:
+    name         (string, required)
+    type         (string, required, enum)
+    lat          (number, required)
+    lng          (number, required)
+    description  (string, optional)
+    radius       (integer ≥ 0, optional, default 0)
+    image        (File, optional, max 5MB, image/*)
+  201:    { id: number, created_at: ISO8601, updated_at: ISO8601 }
+  400:    { error: string }
+  -- Server logic:
+  -- 1. multer lưu file → /uploads/pois/{uuid}.{ext}
+  -- 2. INSERT INTO pois (name, type, lat, lng, description, radius, image)
+  --    (created_at, updated_at tự động được SQLite gán CURRENT_TIMESTAMP)
+```
+
+```
+PUT /api/pois/:id
+  Authorization: Bearer <token>
+  Content-Type:  multipart/form-data
+  Body fields:
+    name, type, lat, lng, description, radius  (như POST)
+    image          (File, optional — ảnh mới)
+    remove_image   (boolean string "true", optional)
+  200:    { success: true, updated_at: ISO8601 }
+  404:    { error: "POI not found" }
+  -- Server logic:
+  -- 1. Lấy record hiện tại để biết image cũ
+  -- 2. Nếu có image mới: fs.unlink(image cũ nếu có) → multer lưu file mới
+  -- 3. Nếu remove_image="true": fs.unlink(image cũ nếu có) → set image = NULL
+  -- 4. UPDATE pois SET ... (updated_at được SQLite tự động cập nhật CURRENT_TIMESTAMP)
+```
+
+```
+DELETE /api/pois/:id
+  Authorization: Bearer <token>
+  200:    { success: true }
+  404:    { error: "POI not found" }
+  409:    { error: "POI đang được dùng trong tour: ['Tour A', 'Tour B']" }
+  -- Server logic:
+  -- 1. Kiểm tra tour_pois: SELECT * FROM tour_pois WHERE poi_id = :id
+  -- 2. Nếu có → trả 409
+  -- 3. Lấy image filename từ DB
+  -- 4. DELETE FROM pois WHERE id = :id
+  -- 5. fs.unlink(/uploads/pois/{image}) nếu image != NULL
+  --    (log warning nếu unlink fail, không throw error)
+```
+
+---
 
 ### 10.3 Tours
 
 ```
 GET /api/tours
-  Auth: Bearer token
-  Response 200: Tour[] — poi_ids là number[], đã parse từ JSON string
+  Authorization: Bearer <token>
+  Query params:  ?search=<text>  (optional)
+  200:    Tour[]
+  -- Mỗi Tour object:
+  -- {
+  --   id: number,
+  --   title: string,
+  --   description: string | null,
+  --   image: string | null,
+  --   created_at: ISO8601 timestamp (VD: "2026-03-15T10:30:45.000Z"),
+  --   updated_at: ISO8601 timestamp,
+  --   image_url: `${BASE_URL}/uploads/tours/${image}` | null,
+  --   pois: [  -- ← Data từ tour_pois JOIN pois table, sắp xếp theo position
+  --     { poi_id, position, name, type, lat, lng, description, radius }
+  --   ]
+  -- }
+  -- ⚠️ IMPORTANT: pois array được lấy từ JOIN:
+  --   SELECT tp.poi_id, tp.position, p.name, p.type, p.lat, p.lng, p.description, p.radius
+  --   FROM tour_pois tp
+  --   JOIN pois p ON tp.poi_id = p.id
+  --   WHERE tp.tour_id = :tour_id
+  --   ORDER BY tp.position ASC
+```
 
+```
 POST /api/tours
-  Auth: Bearer token
-  Body: { title: string, poi_ids: number[] }
-  Response 201: { id: number }
-  Response 400: { error: string }
+  Authorization: Bearer <token>
+  Content-Type:  multipart/form-data
+  Body fields:
+    title         (string, required, max 255)
+    description   (string, optional, max 1000)
+    poi_ids       (JSON string của number[], VD: "[3,1,4]", required, ≥ 1 item)
+                  -- Thứ tự trong mảy = thứ tự click của Admin = position trong tour_pois
+    image         (File, optional)
+  201:    { id: number, created_at: ISO8601, updated_at: ISO8601 }
+  400:    { error: string }
+  -- Server logic:
+  -- 1. Parse poi_ids JSON, validate từng ID tồn tại trong pois
+  -- 2. multer lưu ảnh → /uploads/tours/{uuid}.{ext} (nếu có)
+  -- 3. INSERT INTO tours (title, description, image)  ← KHÔNG INSERT poi_ids vào tours
+  --    (created_at, updated_at tự động được SQLite gán CURRENT_TIMESTAMP)
+  -- 4. Lấy tour_id từ lastInsertRowid
+  -- 5. Xóa cách dữ liệu cũ (nếu tồn tại): DELETE FROM tour_pois WHERE tour_id = ?
+  -- 6. INSERT INTO tour_pois (tour_id, poi_id, position)
+  --    cho từng poi_id: position = index + 1 (theo thứ tự mảy)
+  -- ⚠️ CRITICAL: poi_ids CHỈ được lưu trong bảng tour_pois, KHÔNG lưu trong bảng tours
+```
 
+```
 PUT /api/tours/:id
-  Auth: Bearer token
-  Body: { title: string, poi_ids: number[] }
-  Response 200: { success: true }
-  Response 404: { error: "Tour not found" }
+  Authorization: Bearer <token>
+  Content-Type:  multipart/form-data
+  Body fields:
+    title         (string, required, max 255)
+    description   (string, optional, max 1000)
+    poi_ids       (JSON string, required — thứ tự = thứ tự mới sau khi Admin chỉnh)
+    image         (File, optional — ảnh mới)
+    remove_image  (boolean string "true", optional)
+  200:    { success: true, updated_at: ISO8601 }
+  404:    { error: "Tour not found" }
+  -- Server logic:
+  -- 1. Parse poi_ids JSON, validate từng ID
+  -- 2. Lấy image cũ từ DB để xử lý file
+  -- 3. Xử lý ảnh: fs.unlink cũ + lưu mới (nếu cần)
+  -- 4. UPDATE tours SET title = ?, description = ?, image = ?  ← KHÔNG UPDATE poi_ids vào tours
+  --    (updated_at được SQLite tự động cập nhật CURRENT_TIMESTAMP)
+  -- 5. DELETE FROM tour_pois WHERE tour_id = :id
+  -- 6. INSERT tour_pois mới theo thứ tự poi_ids lúc (position = index + 1)
+  -- ⚠️ CRITICAL: poi_ids CHỈ được lưu trong bảng tour_pois, KHÔNG lưu trong bảng tours
+```
 
+```
 DELETE /api/tours/:id
-  Auth: Bearer token
-  Response 200: { success: true }
-  Response 404: { error: "Tour not found" }
+  Authorization: Bearer <token>
+  200:    { success: true }
+  404:    { error: "Tour not found" }
+  -- Server logic:
+  -- 1. Lấy image filename từ tours table
+  -- 2. DELETE FROM tours WHERE id = :id
+  --    (tour_pois tự xóa do ON DELETE CASCADE trong FK constraint)
+  -- 3. fs.unlink(/uploads/tours/{image}) nếu image != NULL
+  -- ⚠️ NOTE: tour_pois được tự động xóa bởi database, không cần explicit DELETE
+```
+
+---
+
+### 10.4 Static Files
+
+```
+GET /uploads/pois/:filename
+GET /uploads/tours/:filename
+  Authorization: Bearer <token>  ← Bảo vệ, không public
+  200:    Binary (image file)
+  401:    Unauthorized
+  404:    Not found
 ```
 
 ---
@@ -400,67 +812,81 @@ DELETE /api/tours/:id
 
 ### 11.1 Dependencies
 
-| Dependency                    | Loại               | Ghi chú                                       |
-| ----------------------------- | ------------------ | --------------------------------------------- |
-| React 19 + Vite 6             | Frontend framework | Đã có trong codebase                          |
-| react-leaflet 5 + Leaflet 1.9 | Bản đồ             | Đã có, cần tile API key cho production        |
-| CARTO Dark tile               | Map tile provider  | Free tier, kiểm tra rate limit                |
-| Express 4                     | Backend API        | Đã có                                         |
-| better-sqlite3                | Database           | Đã có; phù hợp cho MVP, cần xem xét khi scale |
-| Tailwind CSS 4                | Styling            | Đã có                                         |
-| Motion (Framer)               | Animation          | Đã có                                         |
-| Node.js                       | Runtime            | Cần >= 18                                     |
+| Dependency                     | Loại            | Trạng thái | Ghi chú                                      |
+| ------------------------------ | --------------- | ---------- | -------------------------------------------- |
+| React 19 + Vite 6              | Frontend        | Đã có      |                                              |
+| react-leaflet 5 + Leaflet 1.9  | Bản đồ          | Đã có      | Đổi tile sang sáng                           |
+| OpenStreetMap / CARTO Positron | Map tile        | Free       | Không cần API key                            |
+| Express 4                      | Backend         | Đã có      |                                              |
+| better-sqlite3                 | Database        | Đã có      | Cần migration schema                         |
+| `multer`                       | File upload     | Cần cài    | `npm install multer`                         |
+| `uuid`                         | Đặt tên file    | Cần cài    | `npm install uuid` — tránh tên file conflict |
+| `fs` (Node built-in)           | Xóa file vật lý | Built-in   | `fs.unlink` / `fs.promises.unlink`           |
+| Tailwind CSS 4                 | Styling         | Đã có      | Palette light                                |
+| Motion (Framer)                | Animation       | Đã có      |                                              |
+| Node.js >= 18                  | Runtime         | Cần verify |                                              |
+
+> **Lưu ý v1.3:** Đã loại bỏ `@hello-pangea/dnd` / `dnd-kit` khỏi danh sách dependencies. Không cần cài thêm thư viện nào cho tính năng sắp xếp thứ tự POI — cơ chế click thuần túy, không phụ thuộc thư viện bên ngoài.
 
 ### 11.2 Risks
 
-| #   | Rủi ro                                                                                                                                      | Mức độ                 | Giảm thiểu / Status                                                    |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------- |
-| R1  | React state giữ token để quản lý trạng thái đăng nhập và UI. API requests đọc token từ localStorage để gửi Authorization header..           | ~~Cao~~ Giải quyết     | Server enforce token validation trên POI/Tour routes (partial)         |
-| R2  | ✅ **Chấp nhận cho MVP:** SQLite hoạt động tốt cho 1–5 admin users. API hooks (usePOIs, useTours) tách biệt logic, dễ migrate sang DB khác. | ~~Trung bình~~ Quản lý | Nếu scale: migrate sang PostgreSQL và thay đổi DB adapter              |
-| R3  | **poi_ids lưu JSON string** — mất referential integrity, khó query                                                                          | Trung bình             | Cân nhắc bảng join `tour_pois` trong lần refactor tiếp                 |
-| R4  | **Không có Edit tour:** UI hiện tại chỉ có Create và Delete tour, không có Edit                                                             | Trung bình             | Cần thêm tính năng Edit tour hoặc xác nhận đây là thiết kế có chủ đích |
-| R5  | **Tile provider phụ thuộc bên ngoài** — CARTO có thể down hoặc thay đổi ToS                                                                 | Thấp                   | Chuẩn bị fallback tile (OpenStreetMap standard)                        |
-| R6  | **`confirm()` browser native không nhất quán** trên một số browser                                                                          | Thấp                   | Thay bằng modal dialog component                                       |
-| R7  | **Không có loading state:** Hiện tại không có feedback khi đang gọi API                                                                     | Thấp–Trung             | Thêm loading states theo NFR-LOAD                                      |
+| #                   | Rủi ro                                                                                                   | Mức độ           | Giảm thiểu                                                                                                                   |
+| ------------------- | -------------------------------------------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| R1                  | **Auth chưa implement:** login = `setIsLoggedIn(true)`, API không bảo vệ                                 | Cao              | Implement auth middleware trước production                                                                                   |
+| R2                  | **SQLite concurrent writes** (ít dùng, OK cho MVP)                                                       | Thấp             | Plan migration PostgreSQL khi scale                                                                                          |
+| R3                  | **File orphan:** DB delete OK nhưng `fs.unlink` fail → file rác trên disk                                | Trung bình       | Log + script dọn file orphan định kỳ                                                                                         |
+| R4                  | **File storage ephemeral** trên container → mất ảnh khi restart                                          | Cao (production) | Mount persistent volume; long-term dùng S3/GCS                                                                               |
+| R5                  | **Migration schema** (thêm `radius`, đổi `image_url`→`image`, `poi_ids`→`tour_pois`) có thể gây downtime | Trung bình       | Viết migration script, test staging trước                                                                                    |
+| ~~R6~~              | ~~Drag-to-reorder library tăng bundle size~~                                                             | ~~Thấp~~         | **Đã loại bỏ v1.3 — không còn rủi ro**                                                                                       |
+| R6                  | Contrast marker/polyline trên tile sáng                                                                  | Thấp             | Test visual trước release                                                                                                    |
+| R7                  | `confirm()` native browser không nhất quán                                                               | Thấp             | Thay bằng modal component                                                                                                    |
+| **R8** _(mới v1.3)_ | **UX cơ chế click để đổi thứ tự (bỏ chọn + chọn lại) ít trực quan hơn kéo-thả** — Admin có thể nhầm lẫn  | Thấp-Trung       | Thêm tooltip hướng dẫn: "Để đổi vị trí, bỏ chọn rồi click lại"; hiển thị chuỗi "Lộ trình đã chọn" rõ ràng để Admin kiểm soát |
 
 ---
 
 ## 12. Open Questions
 
-| #     | Câu hỏi                                                                                                                                                                              | Owner        | Deadline    |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ | ----------- |
-| OQ-01 | ✅ Quyết định kỹ thuật: Sử dụng JWT Token lưu tại localStorage. Mọi API gọi lên backend (POST, PUT, DELETE) đều bắt buộc phải đính kèm header Authorization: Bearer <token>.         | Backend Lead | ✅ Sprint 1 |
-| OQ-02 | ✅ **RESOLVED:** Credentials hard-code từ env vars. Default: email = `admin@example.com`, password = `password`. Server: `server.ts` dùng `ADMIN_EMAIL` / `ADMIN_PASSWORD` env vars. | Backend Lead | ✅ Sprint 1 |
-| OQ-03 | **Edit Tour:** Có cần tính năng Edit (sửa tên, thêm/bớt POI) cho Tour không? Codebase đã có `PUT /api/tours/:id` ở server nhưng UI chưa expose.                                      | PO           | Sprint 1    |
-| OQ-04 | **Xóa POI được dùng trong Tour:** Khi xóa POI đang có trong Tour, hành vi mong muốn là gì? (a) Chặn và báo lỗi, (b) Cascade xóa Tour, (c) Để "Unknown" trong Tour                    | PO           | Sprint 1    |
-| OQ-05 | **Số lượng POI/Tour dự kiến:** Bao nhiêu POIs và Tours trong thực tế? Ảnh hưởng đến quyết định pagination và SQLite vs PostgreSQL                                                    | PO           | Sprint 2    |
-| OQ-06 | **Tile API cho production:** CARTO Dark tile có cần API key riêng không, hay free tier đủ dùng?                                                                                      | DevOps       | Sprint 1    |
-| OQ-07 | **Tọa độ mặc định bản đồ:** Hiện tại center `[16.047, 108.206]` (Đà Nẵng). Có cần config lại hay hardcode là đủ?                                                                     | PO           | Sprint 1    |
-| OQ-08 | **`description` trường POI:** Có giới hạn độ dài không? Có hỗ trợ rich text hay plain text?                                                                                          | PO           | Sprint 2    |
-| OQ-09 | **Firebase dependency:** Package `firebase` được cài nhưng không dùng trong code hiện tại. Cần xóa hay sẽ sử dụng về sau?                                                            | Backend Lead | Sprint 1    |
-| OQ-10 | **Gemini API:** Package `@google/genai` được cài và key được cấu hình. Có kế hoạch sử dụng AI feature nào trong scope này không?                                                     | PO           | Sprint 2    |
+| #         | Câu hỏi                                                                                                                 | Trạng thái                                                                          | Owner        | Deadline |
+| --------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------ | -------- |
+| OQ-01     | Auth: Session-based hay JWT? Token lưu ở đâu (httpOnly cookie vs localStorage)?                                         | 🔴 Mở                                                                               | Backend Lead | Sprint 1 |
+| OQ-02     | Admin credentials: hard-code env var hay bảng `users` trong DB?                                                         | 🔴 Mở                                                                               | Backend Lead | Sprint 1 |
+| ~~OQ-03~~ | ~~Có cần Edit Tour?~~                                                                                                   | ✅ Đóng — In-scope, PUT + click-to-order                                            | —            | —        |
+| ~~OQ-04~~ | ~~Xóa POI trong Tour: Chặn hay cascade?~~                                                                               | ✅ Đóng — Chặn 409, không cascade                                                   | —            | —        |
+| OQ-05     | Số lượng POI/Tour dự kiến? Ảnh hưởng pagination                                                                         | 🔴 Mở                                                                               | PO           | Sprint 2 |
+| OQ-06     | CARTO Positron tile có cần API key production?                                                                          | 🟡 Thấp                                                                             | DevOps       | Sprint 1 |
+| ~~OQ-07~~ | ~~Tọa độ trung tâm?~~                                                                                                   | ✅ Đóng — `10.7570, 106.7000`, zoom 16                                              | —            | —        |
+| OQ-08     | `description` POI: giới hạn độ dài? Rich text?                                                                          | 🔴 Mở                                                                               | PO           | Sprint 2 |
+| OQ-09     | Package `firebase` cài nhưng không dùng — xóa?                                                                          | 🟡 Thấp                                                                             | Dev          | Sprint 1 |
+| OQ-10     | Package `@google/genai` — có AI feature nào trong MVP?                                                                  | 🔴 Mở                                                                               | PO           | Sprint 2 |
+| ~~OQ-11~~ | ~~File storage: filesystem hay object storage?~~                                                                        | ✅ Đóng — Filesystem local (`/uploads/`), `fs.unlink`, persistent volume production | —            | —        |
+| OQ-12     | `radius` có cần hiển thị vòng tròn `L.circle` trên map không, hay chỉ text trong popup?                                 | 🔴 Mở                                                                               | PO           | Sprint 1 |
+| OQ-13     | Thư mục `/uploads` có commit vào git không? Cần `.gitignore` với placeholder?                                           | 🟡 Thấp                                                                             | DevOps       | Sprint 1 |
+| OQ-14     | Search POI/Tour: client-side (filter mảng đã fetch) hay server-side (`?search=`)? Client-side đủ dùng khi < 500 records | 🔴 Mở                                                                               | Backend Lead | Sprint 1 |
 
 ---
 
 ## 13. Future Enhancements
 
-> Các tính năng dưới đây **ngoài scope MVP**. Đặt ở đây để ghi nhận cho các sprint sau.
+> Các tính năng dưới đây **ngoài scope MVP**. Ghi nhận để ưu tiên cho sprint sau.
 
-- **Edit Tour:** Sửa tên và POI sequence của tour đã tạo
-- **Kéo-thả sắp xếp POIs trong Tour** (drag-to-reorder thay vì toggle)
-- **Upload ảnh cho POI** (thumbnail, gallery)
-- **Tìm kiếm & lọc POI** theo tên hoặc loại
-- **Phân quyền nhiều role** (Admin, Editor, Viewer)
-- **Quản lý nhiều khu vực bản đồ** (không chỉ Đà Nẵng)
-- **Export tour** ra PDF hoặc chia sẻ link public
-- **Undo/Redo** cho thao tác xóa POI/Tour
-- **Clustering marker** khi zoom out để tránh overlap
-- **Thống kê:** số POI theo loại, số tour, POI phổ biến nhất
-- **Audit log:** lịch sử thao tác của Admin
-- **Mobile responsive** cho màn hình nhỏ
-- **Offline support / PWA**
-- **Multi-language** (EN/VI)
+- **Kéo-thả (drag-to-reorder) thứ tự POI trong Tour** — đã loại bỏ khỏi MVP v1.3; có thể thêm lại sau nếu UX click-to-order không đủ trực quan
+- **Circle overlay trên map** cho `radius` POI (xem OQ-12)
+- Upload nhiều ảnh (gallery) cho POI hoặc Tour
+- Export tour ra PDF hoặc chia sẻ link public
+- Undo/Redo cho thao tác xóa POI/Tour
+- Clustering marker khi zoom out (nhiều POI chồng nhau)
+- Thống kê: số POI theo loại, số tour, POI phổ biến nhất
+- Audit log: lịch sử thao tác của Admin
+- Script tự động dọn file orphan (`/uploads` không có DB record tương ứng)
+- Object storage migration (S3/GCS/Cloudinary) thay filesystem local
+- Phân quyền nhiều role (Admin, Editor, Viewer)
+- Quản lý nhiều khu vực bản đồ (config địa điểm động)
+- Mobile responsive
+- Dark mode toggle (opt-in)
+- Multi-language (EN/VI)
+- Tích hợp Gemini AI (mô tả POI tự động, gợi ý lộ trình)
+- Audio guide cho POI
 
 ---
 
-_Tài liệu này được tổng hợp từ phân tích codebase `poi-_-tour-admin-dashboard`. Mọi thay đổi scope cần được PO xác nhận và cập nhật version PRD.\_
+_PRD v1.3 — Cập nhật từ v1.2. Thay đổi: Loại bỏ kéo-thả, thay bằng cơ chế click-to-order; thêm search POI trong panel Tour; cập nhật US-14, US-15, FR-03.6–FR-03.10, Dependencies (bỏ dnd library), Risks (bỏ R6, thêm R8). Mọi thay đổi scope cần PO xác nhận và update version._

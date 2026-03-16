@@ -32,23 +32,46 @@ export const usePOIs = (token: string | null) => {
   }, [token]);
 
   const savePoi = useCallback(
-    async (poi: POI) => {
+    async (
+      poi: Partial<POI>,
+      imageFile?: File | null,
+      removeImage?: boolean,
+    ) => {
       const method = poi.id ? "PUT" : "POST";
       const url = poi.id ? `/api/pois/${poi.id}` : "/api/pois";
 
-      const headers: HeadersInit = { "Content-Type": "application/json" };
+      // ✅ PHASE 1 C1, C3: Use FormData for multipart/form-data
+      const formData = new FormData();
+      formData.append("name", poi.name || "");
+      formData.append("type", poi.type || "");
+      formData.append("lat", (poi.lat || 0).toString());
+      formData.append("lng", (poi.lng || 0).toString());
+      formData.append("description", poi.description || "");
+      formData.append("radius", (poi.radius || 0).toString());
+
+      if (imageFile) {
+        formData.append("image", imageFile);
+      }
+      if (removeImage) {
+        formData.append("remove_image", "true");
+      }
+
+      const headers: HeadersInit = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
+      // ✅ IMPORTANT: Do NOT set Content-Type - browser will set it with boundary
 
       const res = await fetch(url, {
         method,
         headers,
-        body: JSON.stringify(poi),
+        body: formData,
       });
 
-      if (!res.ok) throw new Error("Lỗi lưu POI");
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Lỗi lưu POI");
+      }
 
       // ✅ FIX: Refresh POI list, nhưng không throw error nếu fetchPois fail
-      // POST đã thành công, không nên block save dù fetch fail
       try {
         await fetchPois();
       } catch (error) {
@@ -56,7 +79,6 @@ export const usePOIs = (token: string | null) => {
           "Cảnh báo: Không thể tải lại danh sách POI, vui lòng refresh",
           error,
         );
-        // Không throw error - POST đã thành công, POI đã insert vào DB
       }
     },
     [token, fetchPois],

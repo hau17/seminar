@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   MapContainer,
   TileLayer,
   Marker,
   Popup,
   useMapEvents,
+  useMap,
   Polyline,
 } from "react-leaflet";
 import L from "leaflet";
@@ -112,15 +113,42 @@ export default function App() {
   const [isEditingPoi, setIsEditingPoi] = useState(false);
   const [newPoiPos, setNewPoiPos] = useState<[number, number] | null>(null);
   const [isCreatingTour, setIsCreatingTour] = useState(false);
+  const [isEditingTour, setIsEditingTour] = useState(false);
+  const [editingTourId, setEditingTourId] = useState<number | null>(null);
   const [currentTour, setCurrentTour] = useState<Partial<Tour>>({
     title: "",
+    description: "", // ✅ PHASE 2 C7: Tour description field
     poi_ids: [],
+    image_url: "",
   });
   const [toasts, setToasts] = useState<
     Array<{ id: string; message: string; type: "error" | "success" }>
   >([]);
   // ✅ FIX #5: Track loading state for CRUD operations (NFR-LOAD-01)
   const [operationLoading, setOperationLoading] = useState(false);
+
+  // ✅ PHASE 1 C4: POI search state
+  const [poiSearchText, setPoiSearchText] = useState("");
+
+  // ✅ PHASE 1 C1, C3: File upload states for POI
+  const [poiImageFile, setPoiImageFile] = useState<File | null>(null);
+  const [poiImagePreview, setPoiImagePreview] = useState<string>("");
+  const [removePoiImage, setRemovePoiImage] = useState(false);
+
+  // ✅ PHASE 1 C5: Map reference for flyTo
+  const mapRef = useRef<L.Map | null>(null);
+
+  // ✅ PHASE 2 C7, C16: Tour search + POI search in form
+  const [tourSearchText, setTourSearchText] = useState("");
+  const [tourPoiSearchText, setTourPoiSearchText] = useState("");
+
+  // ✅ PHASE 2 C6: Tour image file upload state
+  const [tourImageFile, setTourImageFile] = useState<File | null>(null);
+  const [tourImagePreview, setTourImagePreview] = useState<string>("");
+  const [removeTourImage, setRemoveTourImage] = useState(false);
+
+  // ✅ PHASE 2 C8, C18: Track selected tour for map isolation
+  const [selectedTourId, setSelectedTourId] = useState<number | null>(null);
 
   // Use custom hooks for API management (with token)
   const {
@@ -146,6 +174,36 @@ export default function App() {
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
+
+  // ✅ PHASE 1 C1: Handler for POI image selection
+  const handlePoiImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file size (5MB max)
+      if (file.size > 5 * 1024 * 1024) {
+        showToast("Ảnh không được vượt quá 5MB", "error");
+        return;
+      }
+      setPoiImageFile(file);
+      setRemovePoiImage(false);
+
+      // Show preview
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        setPoiImagePreview(evt.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // ✅ PHASE 1 C5: Handler for POI click - flyTo + select
+  const handlePoiItemClick = (poi: POI) => {
+    setSelectedPoi(poi);
+    if (mapRef.current) {
+      mapRef.current.flyTo([poi.lat, poi.lng], 18, { duration: 1 });
+    }
+  };
+
   useEffect(() => {
     const savedToken = localStorage.getItem("authToken");
     if (savedToken) {
@@ -169,6 +227,60 @@ export default function App() {
     }
   }, [isLoggedIn, authToken, fetchPois, fetchTours]);
 
+  // ✅ PHASE 2 C7 + FR-03.19: fitBounds to selected tour POIs
+  useEffect(() => {
+    if (!mapRef.current || selectedTourId === null) return;
+
+    // Find selected tour
+    const selectedTour = tours.find((t) => t.id === selectedTourId);
+    if (!selectedTour || !selectedTour.pois || selectedTour.pois.length === 0)
+      return;
+
+    // ✅ v1.4: Use detailed pois array from selectedTour (already has lat/lng)
+    const tourPois = selectedTour.pois;
+    if (tourPois.length === 0) return;
+
+    // Build bounding box from tour POI coordinates
+    const bounds = L.latLngBounds(tourPois.map((p) => [p.lat, p.lng]));
+
+    // Fit map to bounds with padding
+    mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+  }, [selectedTourId, tours]);
+
+  // ✅ FIX: Reset selectedTourId when switching away from Tours tab (FR-03.20 + prevent state leak)
+  useEffect(() => {
+    if (activeTab === "pois") {
+      setSelectedTourId(null);
+    }
+  }, [activeTab]);
+
+  // ✅ FIX: Populate currentTour state with poi_ids when opening Edit Tour panel (FR-03.13)
+  useEffect(() => {
+    if (isEditingTour && editingTourId !== null) {
+      const tourToEdit = tours.find((t) => t.id === editingTourId);
+      if (tourToEdit) {
+        // ✅ CRITICAL: Extract poi_ids array to populate form correctly
+        // poi_ids might come from tour.poi_ids (field) or computed from tour.pois array
+        const poiIds =
+          tourToEdit.poi_ids ||
+          (tourToEdit.pois ? tourToEdit.pois.map((p: any) => p.poi_id) : []);
+
+        setCurrentTour({
+          id: tourToEdit.id,
+          title: tourToEdit.title,
+          description: tourToEdit.description,
+          poi_ids: poiIds, // ✅ Explicitly set poi_ids for form
+          image: tourToEdit.image,
+        });
+
+        // Set tour image preview
+        setTourImagePreview(
+          tourToEdit.image ? `/uploads/tours/${tourToEdit.image}` : "",
+        );
+      }
+    }
+  }, [isEditingTour, editingTourId, tours]);
+
   const handleSavePoi = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPoi) return;
@@ -183,10 +295,14 @@ export default function App() {
     // ✅ FIX #5: Set loading state for CRUD operation (NFR-LOAD-01)
     setOperationLoading(true);
     try {
-      await savePoi(selectedPoi);
+      // ✅ PHASE 1 C1, C3: Pass imageFile and removeImage to savePoi
+      await savePoi(selectedPoi, poiImageFile, removePoiImage);
       setIsEditingPoi(false);
       setSelectedPoi(null);
       setNewPoiPos(null);
+      setPoiImageFile(null);
+      setPoiImagePreview("");
+      setRemovePoiImage(false);
       showToast(
         selectedPoi.id ? "Cập nhật POI thành công" : "Tạo POI thành công",
         "success",
@@ -230,10 +346,21 @@ export default function App() {
     // ✅ FIX #5: Set loading state (NFR-LOAD-01)
     setOperationLoading(true);
     try {
-      await saveTour(currentTour);
+      // ✅ PHASE 2 C6: Pass imageFile and removeImage to saveTour
+      await saveTour(currentTour, tourImageFile, removeTourImage);
       setIsCreatingTour(false);
-      setCurrentTour({ title: "", poi_ids: [] });
-      showToast("Tạo Tour thành công", "success");
+      setIsEditingTour(false);
+      setEditingTourId(null);
+      setCurrentTour({ title: "", description: "", poi_ids: [], image: "" });
+      setTourImageFile(null);
+      setTourImagePreview("");
+      setRemoveTourImage(false);
+      setTourPoiSearchText("");
+      setSelectedTourId(null); // Reset map isolation
+      showToast(
+        currentTour.id ? "Cập nhật Tour thành công" : "Tạo Tour thành công",
+        "success",
+      );
     } catch (error) {
       console.error(error);
       showToast("Lỗi lưu Tour", "error");
@@ -258,6 +385,12 @@ export default function App() {
   };
 
   const MapEvents = () => {
+    const mapInstance = useMap();
+    // ✅ PHASE 1 C5: Store map reference for flyTo
+    useEffect(() => {
+      mapRef.current = mapInstance;
+    }, [mapInstance]);
+
     useMapEvents({
       click(e) {
         if (activeTab === "pois" && !isEditingPoi) {
@@ -268,6 +401,7 @@ export default function App() {
             lat: e.latlng.lat,
             lng: e.latlng.lng,
             description: "",
+            radius: 0,
           });
           setIsEditingPoi(true);
         }
@@ -326,12 +460,12 @@ export default function App() {
   }
 
   return (
-    <div className="h-full flex bg-zinc-950 text-zinc-100 overflow-hidden">
+    <div className="h-full flex bg-slate-50 text-slate-900 overflow-hidden">
       {" "}
       <ToastContainer toasts={toasts} onRemove={removeToast} />
       {/* Sidebar */}
-      <aside className="w-80 border-r border-zinc-800 flex flex-col bg-zinc-900/50 backdrop-blur-xl">
-        <div className="p-6 border-bottom border-zinc-800">
+      <aside className="w-80 border-r border-slate-200 flex flex-col bg-white backdrop-blur-xl">
+        <div className="p-6 border-bottom border-slate-200">
           <div className="flex items-center gap-3 mb-8">
             <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
               <Navigation className="text-white w-5 h-5" />
@@ -346,7 +480,7 @@ export default function App() {
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all",
                 activeTab === "pois"
                   ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                  : "text-zinc-400 hover:bg-zinc-800",
+                  : "text-slate-600 hover:bg-slate-100",
               )}
             >
               <MapPin className="w-5 h-5" />
@@ -358,7 +492,7 @@ export default function App() {
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all",
                 activeTab === "tours"
                   ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                  : "text-zinc-400 hover:bg-zinc-800",
+                  : "text-slate-600 hover:bg-slate-100",
               )}
             >
               <Layers className="w-5 h-5" />
@@ -371,115 +505,211 @@ export default function App() {
           {activeTab === "pois" ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between px-2">
-                <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-widest">
                   Danh sách POIs
                 </h3>
-                <span className="text-[10px] bg-zinc-800 px-2 py-1 rounded-full text-zinc-400">
-                  {loadingPois ? "..." : pois.length}
+                <span className="text-[10px] bg-slate-100 px-2 py-1 rounded-full text-slate-600">
+                  {loadingPois
+                    ? "..."
+                    : pois.filter((p) =>
+                        p.name
+                          .toLowerCase()
+                          .includes(poiSearchText.toLowerCase()),
+                      ).length}
                 </span>
               </div>
-              {pois.map((poi) => (
-                <div
-                  key={poi.id}
-                  onClick={() => setSelectedPoi(poi)}
-                  className={cn(
-                    "p-4 rounded-xl border transition-all cursor-pointer group",
-                    selectedPoi?.id === poi.id
-                      ? "bg-zinc-800 border-zinc-700"
-                      : "bg-zinc-900/50 border-zinc-800 hover:border-zinc-700",
-                  )}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex gap-3">
-                      <span className="text-xl">{POI_ICONS[poi.type]}</span>
-                      <div>
+
+              {/* ✅ PHASE 1 C4: POI Search field */}
+              <input
+                type="text"
+                placeholder="🔍 Tìm kiếm POI..."
+                value={poiSearchText}
+                onChange={(e) => setPoiSearchText(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-sm"
+              />
+
+              {/* Filter POIs by search text */}
+              {pois
+                .filter((p) =>
+                  p.name.toLowerCase().includes(poiSearchText.toLowerCase()),
+                )
+                .map((poi) => (
+                  <div
+                    key={poi.id}
+                    onClick={() => handlePoiItemClick(poi)}
+                    className={cn(
+                      "p-4 rounded-xl border transition-all cursor-pointer group",
+                      selectedPoi?.id === poi.id
+                        ? "bg-slate-100 border-slate-200"
+                        : "bg-slate-50 border-slate-200 hover:border-slate-300",
+                    )}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 gap-3">
                         <h4 className="font-semibold text-sm">{poi.name}</h4>
-                        <p className="text-xs text-zinc-500">{poi.type}</p>
+                        <p className="text-xs text-slate-700">{poi.type}</p>
+                        {poi.radius ? (
+                          <p className="text-xs text-slate-700">
+                            Radius: {poi.radius}m
+                          </p>
+                        ) : null}
+                        {poi.image && (
+                          <img
+                            src={`/uploads/pois/${poi.image}`}
+                            alt={poi.name}
+                            className="mt-2 h-16 w-full object-cover rounded-lg"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display =
+                                "none";
+                            }}
+                          />
+                        )}
+                      </div>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedPoi(poi);
+                            setIsEditingPoi(true);
+                          }}
+                          className="p-2 text-slate-600 hover:text-emerald-500 transition-colors"
+                          title="Chỉnh sửa"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeletePoi(poi.id!);
+                          }}
+                          className="p-2 text-slate-600 hover:text-red-500 transition-all"
+                          title="Xóa"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedPoi(poi);
-                          setIsEditingPoi(true);
-                        }}
-                        className="p-2 text-zinc-500 hover:text-emerald-400 transition-colors"
-                        title="Chỉnh sửa"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeletePoi(poi.id!);
-                        }}
-                        className="p-2 text-zinc-500 hover:text-red-400 transition-all"
-                        title="Xóa"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="flex items-center justify-between px-2">
-                <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
+              <div className="flex items-center justify-between px-2 mb-2">
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-widest">
                   Danh sách Tours
                 </h3>
                 <button
-                  onClick={() => setIsCreatingTour(true)}
+                  onClick={() => {
+                    setIsCreatingTour(true);
+                    setTourImageFile(null);
+                    setTourImagePreview("");
+                  }}
                   className="p-1 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors"
                 >
                   <Plus className="w-4 h-4" />
                 </button>
               </div>
-              {tours.map((tour) => (
-                <div
-                  key={tour.id}
-                  className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 hover:border-zinc-700 transition-all group"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-semibold text-sm">{tour.title}</h4>
-                    <button
-                      onClick={() => handleDeleteTour(tour.id!)}
-                      className="opacity-0 group-hover:opacity-100 p-2 text-zinc-500 hover:text-red-400 transition-all"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {tour.poi_ids.map((id, idx) => {
-                      const poi = pois.find((p) => p.id === id);
-                      return (
-                        <div key={idx} className="flex items-center">
-                          <span className="text-[10px] bg-zinc-800 px-2 py-1 rounded-md text-zinc-400">
-                            {poi?.name || "Unknown"}
-                          </span>
-                          {idx < tour.poi_ids.length - 1 && (
-                            <ChevronRight className="w-3 h-3 text-zinc-700" />
-                          )}
+
+              {/* ✅ PHASE 2 C7, C16: Tour Search field */}
+              <input
+                type="text"
+                placeholder="🔍 Tìm kiếm Tour..."
+                value={tourSearchText}
+                onChange={(e) => setTourSearchText(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-sm mx-2"
+              />
+
+              {/* Tours list filtered by search */}
+              {tours
+                .filter((t) =>
+                  t.title.toLowerCase().includes(tourSearchText.toLowerCase()),
+                )
+                .map((tour) => (
+                  <div
+                    key={tour.id}
+                    onClick={() => {
+                      const isCurrentlySelected = selectedTourId === tour.id;
+                      setSelectedTourId(isCurrentlySelected ? null : tour.id!);
+                    }}
+                    className={cn(
+                      "p-3 rounded-xl border transition-all cursor-pointer group",
+                      selectedTourId === tour.id
+                        ? "bg-emerald-50 border-emerald-300"
+                        : "bg-slate-50 border-slate-200 hover:border-slate-300",
+                    )}
+                  >
+                    {/* Tour thumbnail */}
+                    {tour.image && (
+                      <img
+                        src={`/uploads/tours/${tour.image}`}
+                        alt={tour.title}
+                        className="w-full h-20 object-cover rounded-lg mb-2"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    )}
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-sm">{tour.title}</h4>
+                        {/* POI order badges */}
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {(tour.poi_ids || []).map((id, idx) => {
+                            const poi = pois.find((p) => p.id === id);
+                            return (
+                              <span
+                                key={idx}
+                                className="text-xs bg-slate-100 px-2 py-1 rounded-md text-slate-600"
+                              >
+                                {idx + 1}. {poi?.name || "Unknown"}
+                              </span>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
+                      </div>
+
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all ml-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTourId(tour.id!);
+                            setIsEditingTour(true);
+                            setCurrentTour({ ...tour });
+                            setTourImageFile(null);
+                            setTourImagePreview(
+                              tour.image ? `/uploads/tours/${tour.image}` : "",
+                            );
+                          }}
+                          className="p-2 text-slate-600 hover:text-emerald-500 transition-colors"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteTour(tour.id!);
+                          }}
+                          className="p-2 text-slate-600 hover:text-red-500 transition-all"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
             </div>
           )}
         </div>
 
-        <div className="p-6 border-t border-zinc-800">
+        <div className="p-6 border-t border-slate-200">
           <button
             onClick={() => {
               localStorage.removeItem("authToken");
               setIsLoggedIn(false);
               setAuthToken(null);
             }}
-            className="w-full flex items-center justify-center gap-2 text-zinc-500 hover:text-white transition-colors text-sm font-medium"
+            className="w-full flex items-center justify-center gap-2 text-slate-600 hover:text-slate-900 transition-colors text-sm font-medium"
           >
             <LogOut className="w-4 h-4" />
             Đăng xuất
@@ -489,65 +719,158 @@ export default function App() {
       {/* Main Content (Map) */}
       <main className="flex-1 relative h-full">
         <MapContainer
-          center={[16.047, 108.206]}
-          zoom={13}
+          center={[10.7615, 106.7046]}
+          zoom={16}
           className="h-full w-full z-0"
         >
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
           />
           <MapEvents />
 
-          {pois.map((poi) => (
-            <Marker
-              key={poi.id}
-              position={[poi.lat, poi.lng]}
-              // ✅ FIX #9: Use color-coded icon based on type and selection (FR-POI-001)
-              icon={getMarkerIcon(poi.type, selectedPoi?.id === poi.id)}
-              eventHandlers={{
-                click: () => {
-                  setSelectedPoi(poi);
-                  setIsEditingPoi(false);
-                },
-              }}
-            >
-              <Popup>
-                <div className="p-2">
-                  <h3 className="font-bold text-zinc-900">{poi.name}</h3>
-                  <p className="text-xs text-zinc-600">{poi.type}</p>
-                  {poi.description && (
-                    <p className="text-xs mt-2 text-zinc-500">
-                      {poi.description}
-                    </p>
-                  )}
-                </div>
-              </Popup>
-            </Marker>
-          ))}
+          {pois
+            .filter((poi) => {
+              // ✅ PHASE 2 C8, C18: Map Isolation - chỉ hiện POI của selected tour (chỉ khi ở tab Tours)
+              if (activeTab === "tours" && selectedTourId !== null) {
+                const selectedTour = tours.find((t) => t.id === selectedTourId);
+                return (selectedTour?.poi_ids || []).includes(poi.id!);
+              }
+              return true; // Default: show all POIs when on POIs tab or no tour selected
+            })
+            .map((poi) => (
+              <Marker
+                key={poi.id}
+                position={[poi.lat, poi.lng]}
+                // ✅ FIX #9: Use color-coded icon based on type and selection (FR-POI-001)
+                icon={getMarkerIcon(poi.type, selectedPoi?.id === poi.id)}
+                eventHandlers={{
+                  click: () => {
+                    setSelectedPoi(poi);
+                    setIsEditingPoi(false);
+                  },
+                }}
+              >
+                <Popup>
+                  <div className="p-2">
+                    <h3 className="font-bold text-zinc-900">{poi.name}</h3>
+                    <p className="text-xs text-slate-700">{poi.type}</p>
+                    {poi.description && (
+                      <p className="text-xs mt-2 text-slate-700">
+                        {poi.description}
+                      </p>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
 
           {/* New POI Marker */}
           {newPoiPos && <Marker position={newPoiPos} />}
 
           {/* Tour Preview Line */}
           {activeTab === "tours" &&
-            tours.map((tour) => {
-              const positions = tour.poi_ids
-                .map((id) => pois.find((p) => p.id === id))
-                .filter((p) => p !== undefined)
-                .map((p) => [p!.lat, p!.lng] as [number, number]);
+            tours
+              .filter((tour) => {
+                // ✅ PHASE 2 C8, C18: Isolation - chỉ hiện polyline của selected tour (khi có tour selected)
+                if (selectedTourId !== null) {
+                  return tour.id === selectedTourId;
+                }
+                return true; // Default: show all polylines when no tour selected
+              })
+              .map((tour) => {
+                // ✅ v1.4: Use detailed pois array (already ordered by position) instead of filtering main pois list
+                const positions = (tour.pois || []).map(
+                  (p) => [p.lat, p.lng] as [number, number],
+                );
 
-              return (
-                <Polyline
-                  key={tour.id}
-                  positions={positions}
-                  color="#10b981"
-                  weight={3}
-                  opacity={0.6}
-                  dashArray="10, 10"
-                />
-              );
-            })}
+                return (
+                  <Polyline
+                    key={tour.id}
+                    positions={positions}
+                    color={selectedTourId === tour.id ? "#10b981" : "#94a3b8"}
+                    weight={selectedTourId === tour.id ? 5 : 3}
+                    opacity={selectedTourId === tour.id ? 1.0 : 0.4}
+                    dashArray={selectedTourId === tour.id ? "" : "10, 10"}
+                  />
+                );
+              })}
+
+          {/* ✅ v1.4: Render order-numbered markers when tour is selected (only on Tours tab) */}
+          {activeTab === "tours" &&
+            selectedTourId !== null &&
+            (() => {
+              const selectedTour = tours.find((t) => t.id === selectedTourId);
+              if (
+                !selectedTour ||
+                !selectedTour.pois ||
+                selectedTour.pois.length === 0
+              ) {
+                return null;
+              }
+
+              // Create icon with position number
+              const getOrderedMarkerIcon = (position: number) => {
+                return L.divIcon({
+                  html: `<div style="
+                    background-color: #10b981;
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 18px;
+                    font-weight: bold;
+                    color: white;
+                    border: 3px solid white;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                  ">
+                    ${position}
+                  </div>`,
+                  iconSize: [40, 40],
+                  iconAnchor: [20, 40],
+                  popupAnchor: [0, -40],
+                  className: "tour-marker",
+                });
+              };
+
+              return selectedTour.pois.map((poiData, idx) => (
+                <Marker
+                  key={`tour-${selectedTourId}-poi-${poiData.poi_id}`}
+                  position={[poiData.lat, poiData.lng]}
+                  icon={getOrderedMarkerIcon(poiData.position)}
+                  eventHandlers={{
+                    click: () => {
+                      const mainPoi = pois.find((p) => p.id === poiData.poi_id);
+                      if (mainPoi) {
+                        setSelectedPoi(mainPoi);
+                        setIsEditingPoi(false);
+                      }
+                    },
+                  }}
+                >
+                  <Popup>
+                    <div className="p-2">
+                      <h3 className="font-bold text-zinc-900">
+                        {poiData.name}
+                      </h3>
+                      <p className="text-xs text-slate-700">{poiData.type}</p>
+                      <p className="text-xs text-emerald-600 font-semibold mt-1">
+                        Vị trí #{poiData.position}
+                      </p>
+                      {poiData.description && (
+                        <p className="text-xs mt-2 text-slate-700">
+                          {poiData.description}
+                        </p>
+                      )}
+                    </div>
+                  </Popup>
+                </Marker>
+              ));
+            })()}
         </MapContainer>
 
         {/* Overlays */}
@@ -557,7 +880,7 @@ export default function App() {
               initial={{ x: 400 }}
               animate={{ x: 0 }}
               exit={{ x: 400 }}
-              className="absolute top-0 right-0 h-full w-96 bg-zinc-900/95 backdrop-blur-xl border-l border-zinc-800 z-10 p-8 shadow-2xl overflow-y-auto"
+              className="absolute top-0 right-0 h-full w-96 bg-white/95 backdrop-blur-xl border-l border-slate-200 z-10 p-8 shadow-2xl overflow-y-auto"
             >
               <div className="flex items-center justify-between mb-8">
                 <h2 className="text-xl font-bold">
@@ -569,7 +892,7 @@ export default function App() {
                     setSelectedPoi(null);
                     setNewPoiPos(null);
                   }}
-                  className="p-2 hover:bg-zinc-800 rounded-full"
+                  className="p-2 hover:bg-slate-100 rounded-full"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -577,7 +900,7 @@ export default function App() {
 
               <form onSubmit={handleSavePoi} className="space-y-6">
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
                     Tên điểm
                   </label>
                   <input
@@ -586,13 +909,13 @@ export default function App() {
                     onChange={(e) =>
                       setSelectedPoi({ ...selectedPoi, name: e.target.value })
                     }
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
                     placeholder="Nhập tên điểm tham quan..."
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
                     Loại điểm
                   </label>
                   <select
@@ -603,7 +926,7 @@ export default function App() {
                         type: e.target.value as POIType,
                       })
                     }
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
                   >
                     {Object.values(POIType).map((t) => (
                       <option key={t} value={t}>
@@ -614,7 +937,7 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
                     Mô tả
                   </label>
                   <textarea
@@ -625,30 +948,112 @@ export default function App() {
                         description: e.target.value,
                       })
                     }
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 h-32 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 h-32 focus:outline-none focus:border-emerald-500"
                     placeholder="Mô tả chi tiết về địa điểm này..."
                   />
                 </div>
 
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
+                    Bán kính (mét)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={selectedPoi.radius || 0}
+                    onChange={(e) =>
+                      setSelectedPoi({
+                        ...selectedPoi,
+                        radius: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                {/* ✅ PHASE 1 C1: Image file upload field (replaces image_url) */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
+                    Hình ảnh (max 5MB)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePoiImageSelect}
+                    disabled={operationLoading}
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-none focus:border-emerald-500 text-sm"
+                  />
+
+                  {/* Image preview */}
+                  {(poiImagePreview ||
+                    (selectedPoi?.image && !removePoiImage)) && (
+                    <div className="mt-3 relative h-32 bg-slate-100 rounded-lg overflow-hidden border border-slate-200">
+                      <img
+                        src={
+                          poiImagePreview ||
+                          `/uploads/pois/${selectedPoi?.image}`
+                        }
+                        alt="Preview"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPoiImageFile(null);
+                          setPoiImagePreview("");
+                          if (selectedPoi?.image && selectedPoi.id) {
+                            setRemovePoiImage(true);
+                          }
+                        }}
+                        className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-lg hover:bg-red-600 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
                       Vĩ độ (Lat)
                     </label>
                     <input
-                      disabled
+                      type="number"
+                      step="0.000001"
+                      min="-90"
+                      max="90"
                       value={selectedPoi.lat.toFixed(6)}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-500 text-xs"
+                      onChange={(e) =>
+                        setSelectedPoi({
+                          ...selectedPoi,
+                          lat: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
                       Kinh độ (Lng)
                     </label>
                     <input
-                      disabled
+                      type="number"
+                      step="0.000001"
+                      min="-180"
+                      max="180"
                       value={selectedPoi.lng.toFixed(6)}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-500 text-xs"
+                      onChange={(e) =>
+                        setSelectedPoi({
+                          ...selectedPoi,
+                          lng: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                 </div>
@@ -656,7 +1061,7 @@ export default function App() {
                 <button
                   type="submit"
                   disabled={operationLoading}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/20"
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-700 disabled:text-slate-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/20"
                 >
                   {operationLoading ? (
                     <div className="flex items-center justify-center gap-2">
@@ -671,26 +1076,43 @@ export default function App() {
             </motion.div>
           )}
 
-          {isCreatingTour && (
+          {(isCreatingTour || isEditingTour) && (
             <motion.div
               initial={{ x: 400 }}
               animate={{ x: 0 }}
               exit={{ x: 400 }}
-              className="absolute top-0 right-0 h-full w-96 bg-zinc-900/95 backdrop-blur-xl border-l border-zinc-800 z-10 p-8 shadow-2xl overflow-y-auto"
+              className="absolute top-0 right-0 h-full w-96 bg-white/95 backdrop-blur-xl border-l border-slate-200 z-10 p-8 shadow-2xl overflow-y-auto"
             >
-              <div className="flex items-center justify-between mb-8">
-                <h2 className="text-xl font-bold">Tạo Tour mới</h2>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold">
+                  {isEditingTour ? "Sửa Tour" : "Tạo Tour mới"}
+                </h2>
                 <button
-                  onClick={() => setIsCreatingTour(false)}
-                  className="p-2 hover:bg-zinc-800 rounded-full"
+                  onClick={() => {
+                    setIsCreatingTour(false);
+                    setIsEditingTour(false);
+                    setEditingTourId(null);
+                    setCurrentTour({
+                      title: "",
+                      description: "",
+                      poi_ids: [],
+                      image: "",
+                    });
+                    setTourImageFile(null);
+                    setTourImagePreview("");
+                    setRemoveTourImage(false);
+                    setTourPoiSearchText("");
+                  }}
+                  className="p-2 hover:bg-slate-100 rounded-full"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
               <form onSubmit={handleSaveTour} className="space-y-6">
+                {/* Tour Title */}
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
                     Tên Tour
                   </label>
                   <input
@@ -699,57 +1121,199 @@ export default function App() {
                     onChange={(e) =>
                       setCurrentTour({ ...currentTour, title: e.target.value })
                     }
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
                     placeholder="Nhập tên lộ trình..."
                   />
                 </div>
 
+                {/* ✅ PHASE 2 C7: Tour Description */}
                 <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">
-                    Chọn POIs (theo thứ tự)
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
+                    Mô tả (tối đa 1000 ký tự)
                   </label>
-                  <div className="space-y-2 mt-2">
-                    {pois.map((poi) => {
-                      const isSelected = currentTour.poi_ids?.includes(poi.id!);
-                      const order = currentTour.poi_ids?.indexOf(poi.id!) ?? -1;
+                  <textarea
+                    value={currentTour.description || ""}
+                    onChange={(e) =>
+                      setCurrentTour({
+                        ...currentTour,
+                        description: e.target.value.substring(0, 1000),
+                      })
+                    }
+                    maxLength={1000}
+                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 resize-none"
+                    placeholder="Ghi chú thông tin ngắn gọn về lộ trình..."
+                    rows={3}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    {(currentTour.description || "").length}/1000
+                  </p>
+                </div>
 
-                      return (
-                        <button
-                          key={poi.id}
-                          type="button"
-                          onClick={() => {
-                            const newIds = [...(currentTour.poi_ids || [])];
-                            if (isSelected) {
-                              newIds.splice(order, 1);
-                            } else {
-                              newIds.push(poi.id!);
-                            }
-                            setCurrentTour({ ...currentTour, poi_ids: newIds });
-                          }}
-                          className={cn(
-                            "w-full flex items-center justify-between p-3 rounded-xl border transition-all",
-                            isSelected
-                              ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
-                              : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600",
-                          )}
-                        >
-                          <div className="flex items-center gap-3">
-                            <span>{POI_ICONS[poi.type]}</span>
-                            <span className="text-sm font-medium">
-                              {poi.name}
+                {/* ✅ PHASE 2 C6: Tour Image Upload */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
+                    Hình ảnh đại diện (max 5MB)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        if (file.size > 5 * 1024 * 1024) {
+                          showToast("Ảnh không được vượt quá 5MB", "error");
+                          return;
+                        }
+                        setTourImageFile(file);
+                        setRemoveTourImage(false);
+
+                        const reader = new FileReader();
+                        reader.onload = (evt) => {
+                          setTourImagePreview(evt.target?.result as string);
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    disabled={operationLoading}
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-none focus:border-emerald-500 text-sm"
+                  />
+
+                  {/* Tour image preview */}
+                  {(tourImagePreview ||
+                    (currentTour?.image && !removeTourImage)) && (
+                    <div className="mt-3 relative h-32 bg-slate-100 rounded-lg overflow-hidden border border-slate-200">
+                      <img
+                        src={
+                          tourImagePreview ||
+                          `/uploads/tours/${currentTour?.image}`
+                        }
+                        alt="Preview"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTourImageFile(null);
+                          setTourImagePreview("");
+                          if (currentTour?.image && currentTour.id) {
+                            setRemoveTourImage(true);
+                          }
+                        }}
+                        className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-lg hover:bg-red-600 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* ✅ PHASE 2 C15, C16: POI Selection with Search + Order Badges */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
+                    Chọn POIs (theo thứ tự click)
+                  </label>
+
+                  {/* ✅ PHASE 2 C8: POI order display string */}
+                  {currentTour.poi_ids && currentTour.poi_ids.length > 0 && (
+                    <div className="mb-3 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+                      <p className="text-xs font-semibold text-emerald-700 mb-1">
+                        Lộ trình đã chọn:
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {currentTour.poi_ids.map((poi_id, idx) => {
+                          const poi = pois.find((p) => p.id === poi_id);
+                          return (
+                            <span
+                              key={poi_id}
+                              className="text-xs bg-emerald-500 text-white px-2 py-1 rounded-full"
+                            >
+                              [{idx + 1}: {poi?.name || "Unknown"}]
+                              {idx < currentTour.poi_ids!.length - 1 && (
+                                <span className="ml-1">→</span>
+                              )}
                             </span>
-                          </div>
-                          {isSelected && (
-                            <span className="w-6 h-6 bg-emerald-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                              {order + 1}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ✅ PHASE 2 C16: POI Search within form */}
+                  <input
+                    type="text"
+                    placeholder="🔍 Tìm kiếm POI..."
+                    value={tourPoiSearchText}
+                    onChange={(e) => setTourPoiSearchText(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-sm mb-3"
+                  />
+
+                  {/* POI list with order badges */}
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {pois
+                      .filter((p) =>
+                        p.name
+                          .toLowerCase()
+                          .includes(tourPoiSearchText.toLowerCase()),
+                      )
+                      .map((poi) => {
+                        const isSelected = currentTour.poi_ids?.includes(
+                          poi.id!,
+                        );
+                        const order =
+                          currentTour.poi_ids?.indexOf(poi.id!) ?? -1;
+
+                        return (
+                          <button
+                            key={poi.id}
+                            type="button"
+                            onClick={() => {
+                              const newIds = [...(currentTour.poi_ids || [])];
+                              if (isSelected) {
+                                newIds.splice(order, 1);
+                              } else {
+                                newIds.push(poi.id!);
+                              }
+                              setCurrentTour({
+                                ...currentTour,
+                                poi_ids: newIds,
+                              });
+                            }}
+                            className={cn(
+                              "w-full flex items-center justify-between p-3 rounded-xl border transition-all",
+                              isSelected
+                                ? "bg-emerald-50 border-emerald-300 text-emerald-700"
+                                : "bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300",
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span>{POI_ICONS[poi.type]}</span>
+                              <div className="text-left">
+                                <div className="text-sm font-medium">
+                                  {poi.name}
+                                </div>
+                                {poi.radius ? (
+                                  <div className="text-xs text-slate-500">
+                                    {poi.radius}m
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                            {/* ✅ PHASE 2 C15: Badge with order number */}
+                            {isSelected && (
+                              <span className="w-6 h-6 bg-emerald-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                                {order + 1}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
                   </div>
                 </div>
 
+                {/* Submit Button */}
                 <button
                   type="submit"
                   disabled={
@@ -757,13 +1321,15 @@ export default function App() {
                     !currentTour.title ||
                     currentTour.poi_ids?.length === 0
                   }
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/20"
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-700 disabled:text-slate-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/20"
                 >
                   {operationLoading ? (
                     <div className="flex items-center justify-center gap-2">
                       <LoadingSpinner />
                       Đang lưu...
                     </div>
+                  ) : isEditingTour ? (
+                    "Lưu thay đổi"
                   ) : (
                     "Lưu lộ trình"
                   )}
@@ -774,15 +1340,15 @@ export default function App() {
         </AnimatePresence>
 
         {/* Map Legend */}
-        <div className="absolute bottom-8 left-8 z-10 bg-zinc-900/80 backdrop-blur-md border border-zinc-800 p-4 rounded-2xl shadow-xl">
-          <h5 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3">
+        <div className="absolute bottom-8 left-8 z-10 bg-white/80 backdrop-blur-md border border-slate-200 p-4 rounded-2xl shadow-xl">
+          <h5 className="text-[10px] font-bold text-slate-700 uppercase tracking-widest mb-3">
             Chú thích
           </h5>
           <div className="grid grid-cols-2 gap-x-6 gap-y-2">
             {Object.entries(POI_ICONS).map(([type, icon]) => (
               <div key={type} className="flex items-center gap-2">
                 <span className="text-sm">{icon}</span>
-                <span className="text-[10px] text-zinc-400">{type}</span>
+                <span className="text-[10px] text-slate-600">{type}</span>
               </div>
             ))}
           </div>
