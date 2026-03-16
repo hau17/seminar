@@ -56,7 +56,7 @@
 
 Admin Dashboard là ứng dụng web nội bộ cho phép quản trị viên quản lý tập trung các **điểm tham quan (POI)** và **lộ trình tour** trên bản đồ tương tác. Địa bàn mặc định: **Khu phố ẩm thực Vĩnh Khánh, Quận 4, TP.HCM** (tọa độ trung tâm: `10.7570°N, 106.7000°E`, zoom 16). Giao diện sử dụng **Light mode** với bản đồ tile sáng.
 
-Stack: React 19 + Vite 6 (frontend), Express 4 + SQLite via `better-sqlite3` (backend), Leaflet / react-leaflet (bản đồ), Tailwind CSS 4 (styling), `multer` (file upload middleware).
+Stack: React 19 + Vite 6 (frontend), Express 4 + SQLite via `better-sqlite3` (backend), Leaflet / react-leaflet (bản đồ), Tailwind CSS 3 (styling), `multer` (file upload middleware).
 
 ### Mục tiêu MVP
 
@@ -822,7 +822,7 @@ GET /uploads/tours/:filename
 | `multer`                       | File upload     | Cần cài    | `npm install multer`                         |
 | `uuid`                         | Đặt tên file    | Cần cài    | `npm install uuid` — tránh tên file conflict |
 | `fs` (Node built-in)           | Xóa file vật lý | Built-in   | `fs.unlink` / `fs.promises.unlink`           |
-| Tailwind CSS 4                 | Styling         | Đã có      | Palette light                                |
+| Tailwind CSS 3                 | Styling         | Đã có      | Palette light                                |
 | Motion (Framer)                | Animation       | Đã có      |                                              |
 | Node.js >= 18                  | Runtime         | Cần verify |                                              |
 
