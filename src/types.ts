@@ -35,3 +35,81 @@ export interface Tour {
   }>;
   image?: string; // ✅ PHASE 1 C6: Filename only (not full URL) - changed from image_url
 }
+
+// ✅ v1.5 BUSINESS TYPES
+// ✅ v1.6: Removed DRAFT status - businesses create Pending, admin creates Approved
+export enum POIStatus {
+  PENDING = "Pending",
+  APPROVED = "Approved",
+  REJECTED = "Rejected",
+}
+
+export interface BusinessUser {
+  id: number;
+  company_name: string;
+  email: string;
+  phone?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BusinessPOI extends POI {
+  id: number;
+  status: POIStatus;
+  owner_id: number;
+  reject_reason?: string;
+  image_url?: string; // ✅ Full URL for display (different from POI.image)
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BusinessAuthState {
+  business: BusinessUser | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  error: string | null;
+}
+
+// ✅ v1.7 BUSINESS AUTH RESPONSE
+export interface BusinessAuthResponse {
+  success: boolean;
+  business_id: number;
+  business_token: string;
+  company_name: string;
+  email: string;
+  message: string;
+}
+
+// ✅ v1.7 POI WITH STATUS & OWNER
+export interface POIWithStatus extends POI {
+  id: number;
+  status: POIStatus;
+  owner_id: number;
+  reject_reason?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ✅ v1.7 EDIT/DELETE REQUESTS
+export interface EditRequest {
+  id: number;
+  poi_id: number;
+  business_id: number;
+  new_data: Record<string, any>;
+  state: "PENDING" | "APPROVED" | "REJECTED";
+  rejected_reason?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeleteRequest {
+  id: number;
+  poi_id: number;
+  business_id: number;
+  state: "PENDING" | "APPROVED" | "REJECTED";
+  rejected_reason?: string;
+  created_at: string;
+  updated_at: string;
+}

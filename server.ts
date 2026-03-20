@@ -5,6 +5,8 @@ import { fileURLToPath } from "url";
 import jwt from "jsonwebtoken";
 import multer from "multer";
 import fs from "fs";
+import bcrypt from "bcrypt";
+import businessesRouter from "./src/routes/businesses.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const db = new Database("data.db");
@@ -63,6 +65,9 @@ db.exec(`
     description TEXT,
     radius INTEGER DEFAULT 0,
     image TEXT,
+    status TEXT NOT NULL DEFAULT 'Approved',
+    owner_id INTEGER REFERENCES businesses(id),
+    reject_reason TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
@@ -84,6 +89,16 @@ db.exec(`
     FOREIGN KEY (tour_id) REFERENCES tours(id) ON DELETE CASCADE,
     FOREIGN KEY (poi_id) REFERENCES pois(id) ON DELETE CASCADE,
     UNIQUE (tour_id, position)
+  );
+
+  CREATE TABLE IF NOT EXISTS businesses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    phone TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 `);
 
@@ -160,6 +175,30 @@ try {
     `ALTER TABLE tours ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
   );
   console.log("[MIGRATION] Added updated_at column to tours");
+} catch (e) {
+  // Column already exists
+}
+
+// ✅ v1.5: Migrate pois status, owner_id, reject_reason (Business Portal support)
+try {
+  db.exec(
+    `ALTER TABLE pois ADD COLUMN status TEXT NOT NULL DEFAULT 'Approved';`,
+  );
+  console.log("[MIGRATION] Added status column to pois");
+} catch (e) {
+  // Column already exists
+}
+try {
+  db.exec(
+    `ALTER TABLE pois ADD COLUMN owner_id INTEGER REFERENCES businesses(id);`,
+  );
+  console.log("[MIGRATION] Added owner_id column to pois");
+} catch (e) {
+  // Column already exists
+}
+try {
+  db.exec(`ALTER TABLE pois ADD COLUMN reject_reason TEXT;`);
+  console.log("[MIGRATION] Added reject_reason column to pois");
 } catch (e) {
   // Column already exists
 }
@@ -245,6 +284,9 @@ async function startServer() {
     }
   };
 
+  // ✅ v1.7: Register modular business router
+  app.use("/api/businesses", businessesRouter);
+
   // API Routes
 
   // Auth
@@ -257,6 +299,651 @@ async function startServer() {
       res.json({ token });
     } else {
       res.status(401).json({ error: "Sai email hoặc mật khẩu" });
+    }
+  });
+
+  // ✅ v1.5 BUSINESS AUTH ENDPOINTS
+  // Business Register
+  app.post("/api/businesses/register", async (req, res) => {
+    try {
+      const { company_name, email, password, phone } = req.body;
+
+      // Validate input
+      if (!company_name || !company_name.trim()) {
+        return res.status(400).json({ error: "Tên công ty không được rỗng" });
+      }
+      if (!email || !email.trim()) {
+        return res.status(400).json({ error: "Email không được rỗng" });
+      }
+      if (!password || password.length < 8) {
+        return res
+          .status(400)
+          .json({ error: "Mật khẩu phải tối thiểu 8 ký tự" });
+      }
+
+      // Check if email already exists
+      const existingBusiness = db
+        .prepare("SELECT id FROM businesses WHERE email = ?")
+        .get(email);
+      if (existingBusiness) {
+        return res.status(400).json({ error: "Email đã tồn tại" });
+      }
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // Insert new business
+      const result = db
+        .prepare(
+          "INSERT INTO businesses (company_name, email, password, phone) VALUES (?, ?, ?, ?)",
+        )
+        .run(company_name, email, hashedPassword, phone || null);
+
+      const businessId = result.lastInsertRowid;
+
+      // Create token
+      const token = jwt.sign(
+        { business_id: businessId, email, role: "business" },
+        JWT_SECRET,
+        { expiresIn: "24h" },
+      );
+
+      res.status(201).json({
+        business_id: businessId,
+        company_name,
+        email,
+        token,
+      });
+    } catch (error) {
+      console.error("POST /api/businesses/register error:", error);
+      res.status(500).json({ error: "Lỗi đăng ký tài khoản" });
+    }
+  });
+
+  // Business Login
+  app.post("/api/businesses/login", async (req, res) => {
+    try {
+      const { email, password } = req.body;
+
+      if (!email || !password) {
+        return res
+          .status(400)
+          .json({ error: "Email và mật khẩu không được rỗng" });
+      }
+
+      // Find business
+      const business = db
+        .prepare(
+          "SELECT id, company_name, email, password FROM businesses WHERE email = ?",
+        )
+        .get(email) as any;
+
+      if (!business) {
+        return res.status(401).json({ error: "Email hoặc mật khẩu sai" });
+      }
+
+      // Verify password
+      const passwordMatch = await bcrypt.compare(password, business.password);
+      if (!passwordMatch) {
+        return res.status(401).json({ error: "Email hoặc mật khẩu sai" });
+      }
+
+      // Create token
+      const token = jwt.sign(
+        { business_id: business.id, email: business.email, role: "business" },
+        JWT_SECRET,
+        { expiresIn: "24h" },
+      );
+
+      res.json({
+        business_id: business.id,
+        company_name: business.company_name,
+        email: business.email,
+        token,
+      });
+    } catch (error) {
+      console.error("POST /api/businesses/login error:", error);
+      res.status(500).json({ error: "Lỗi đăng nhập" });
+    }
+  });
+
+  // Business Logout (simple — just client-side token removal)
+  app.post("/api/businesses/logout", (req, res) => {
+    res.json({ success: true });
+  });
+
+  // ✅ v1.5 BUSINESS POI ENDPOINTS
+  // Middleware to check business auth
+  const businessAuthMiddleware = (req: any, res: any, next: any) => {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      if (decoded.role !== "business") {
+        return res.status(403).json({ error: "Business access required" });
+      }
+      req.business_id = decoded.business_id;
+      next();
+    } catch (error) {
+      res.status(401).json({ error: "Invalid token" });
+    }
+  };
+
+  // Get POIs belonging to logged-in business
+  app.get("/api/businesses/pois", businessAuthMiddleware, (req, res) => {
+    try {
+      const businessId = (req as any).business_id;
+
+      const pois = db
+        .prepare(
+          "SELECT * FROM pois WHERE owner_id = ? ORDER BY created_at DESC",
+        )
+        .all(businessId) as Array<any>;
+
+      const formatted = pois.map((p: any) => ({
+        ...p,
+        image_url: p.image
+          ? `http://localhost:3000/uploads/pois/${p.image}`
+          : null,
+      }));
+
+      res.json(formatted);
+    } catch (error) {
+      console.error("GET /api/businesses/pois error:", error);
+      res.status(500).json({ error: "Lỗi tải danh sách POI" });
+    }
+  });
+
+  // Business creates new POI (status = Pending)
+  app.post(
+    "/api/businesses/pois",
+    businessAuthMiddleware,
+    upload.single("image"),
+    (req, res) => {
+      try {
+        const businessId = (req as any).business_id;
+        const { name, type, lat, lng, description, radius } = req.body;
+
+        // Validate POI data
+        if (!name || !name.trim()) {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res.status(400).json({ error: "Tên điểm không được rỗng" });
+        }
+
+        if (
+          !type ||
+          !["Chính", "WC", "Bán vé", "Gửi xe", "Bến thuyền"].includes(type)
+        ) {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res.status(400).json({ error: "Loại điểm không hợp lệ" });
+        }
+
+        const latNum = parseFloat(lat);
+        const lngNum = parseFloat(lng);
+
+        if (typeof latNum !== "number" || typeof lngNum !== "number") {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res.status(400).json({ error: "Tọa độ phải là số" });
+        }
+
+        if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res.status(400).json({ error: "Tọa độ ngoài phạm vi hợp lệ" });
+        }
+
+        const radiusNum = radius ? parseInt(radius) : 0;
+        if (!Number.isInteger(radiusNum) || radiusNum < 0) {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res
+            .status(400)
+            .json({ error: "Bán kính phải là số nguyên ≥ 0" });
+        }
+
+        const imageFilename = req.file ? req.file.filename : null;
+
+        // ✅ v1.6: Insert with status='Pending' (no Draft) — doanh nghiệp gửi duyệt ngay
+        const info = db
+          .prepare(
+            "INSERT INTO pois (name, type, lat, lng, description, radius, image, status, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', ?)",
+          )
+          .run(
+            name,
+            type,
+            latNum,
+            lngNum,
+            description || null,
+            radiusNum,
+            imageFilename,
+            businessId,
+          );
+
+        const createdPoi = db
+          .prepare(
+            "SELECT id, created_at, updated_at, status FROM pois WHERE id = ?",
+          )
+          .get(info.lastInsertRowid) as any;
+
+        res.status(201).json({
+          id: createdPoi.id,
+          status: createdPoi.status,
+          created_at: createdPoi.created_at,
+          updated_at: createdPoi.updated_at,
+        });
+      } catch (error) {
+        console.error("POST /api/businesses/pois error:", error);
+        if ((req as any).file) {
+          try {
+            fs.unlinkSync((req as any).file.path);
+          } catch (e) {
+            console.warn("Failed to cleanup file after error");
+          }
+        }
+        res.status(500).json({ error: "Lỗi tạo điểm" });
+      }
+    },
+  );
+
+  // Business edits their own POI (only if status = Draft or Rejected)
+  app.put(
+    "/api/businesses/pois/:id",
+    businessAuthMiddleware,
+    upload.single("image"),
+    (req, res) => {
+      try {
+        const businessId = (req as any).business_id;
+        const poiId = parseInt(req.params.id);
+        const { name, type, lat, lng, description, radius, remove_image } =
+          req.body;
+
+        // Check ownership
+        const poi = db
+          .prepare("SELECT * FROM pois WHERE id = ? AND owner_id = ?")
+          .get(poiId, businessId) as any;
+
+        if (!poi) {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res
+            .status(403)
+            .json({ error: "Không có quyền chỉnh sửa POI này" });
+        }
+
+        // Can only edit if status is Pending or Rejected
+        // ✅ v1.6: Removed Draft status - now only Pending/Rejected can be edited
+        if (poi.status !== "Pending" && poi.status !== "Rejected") {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res.status(403).json({
+            error: `Không thể chỉnh sửa POI với trạng thái ${poi.status}`,
+          });
+        }
+
+        // Validate input
+        if (!name || !name.trim()) {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res.status(400).json({ error: "Tên điểm không được rỗng" });
+        }
+
+        if (
+          !type ||
+          !["Chính", "WC", "Bán vé", "Gửi xe", "Bến thuyền"].includes(type)
+        ) {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res.status(400).json({ error: "Loại điểm không hợp lệ" });
+        }
+
+        const latNum = parseFloat(lat);
+        const lngNum = parseFloat(lng);
+
+        if (typeof latNum !== "number" || typeof lngNum !== "number") {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res.status(400).json({ error: "Tọa độ phải là số" });
+        }
+
+        if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res.status(400).json({ error: "Tọa độ ngoài phạm vi hợp lệ" });
+        }
+
+        const radiusNum = radius ? parseInt(radius) : 0;
+        if (!Number.isInteger(radiusNum) || radiusNum < 0) {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res
+            .status(400)
+            .json({ error: "Bán kính phải là số nguyên ≥ 0" });
+        }
+
+        // Handle image
+        if (remove_image === "true" && poi.image) {
+          try {
+            const imagePath = path.join(poisDir, poi.image);
+            fs.unlinkSync(imagePath);
+            console.log(`[FS.UNLINK] Removed POI image: ${imagePath}`);
+          } catch (e) {
+            console.warn(
+              `[FS.UNLINK] Warning: Could not delete POI image: ${e}`,
+            );
+          }
+        } else if (req.file && poi.image) {
+          try {
+            const imagePath = path.join(poisDir, poi.image);
+            fs.unlinkSync(imagePath);
+            console.log(`[FS.UNLINK] Replaced POI image: ${imagePath}`);
+          } catch (e) {
+            console.warn(
+              `[FS.UNLINK] Warning: Could not delete old POI image: ${e}`,
+            );
+          }
+        }
+
+        const imageFilename = req.file
+          ? req.file.filename
+          : remove_image === "true"
+            ? null
+            : poi.image;
+
+        db.prepare(
+          "UPDATE pois SET name = ?, type = ?, lat = ?, lng = ?, description = ?, radius = ?, image = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        ).run(
+          name,
+          type,
+          latNum,
+          lngNum,
+          description || null,
+          radiusNum,
+          imageFilename,
+          poiId,
+        );
+
+        const updatedPoi = db
+          .prepare("SELECT updated_at FROM pois WHERE id = ?")
+          .get(poiId) as any;
+
+        res.json({ success: true, updated_at: updatedPoi.updated_at });
+      } catch (error) {
+        console.error("PUT /api/businesses/pois/:id error:", error);
+        if ((req as any).file) {
+          try {
+            fs.unlinkSync((req as any).file.path);
+          } catch (e) {
+            console.warn("Failed to cleanup file after error");
+          }
+        }
+        res.status(500).json({ error: "Lỗi cập nhật POI" });
+      }
+    },
+  );
+
+  // Business deletes their own POI (only if status = Draft or Rejected)
+  app.delete("/api/businesses/pois/:id", businessAuthMiddleware, (req, res) => {
+    try {
+      const businessId = (req as any).business_id;
+      const poiId = parseInt(req.params.id);
+
+      if (!poiId) {
+        return res.status(400).json({ error: "POI ID không hợp lệ" });
+      }
+
+      // Check ownership
+      const poi = db
+        .prepare("SELECT * FROM pois WHERE id = ? AND owner_id = ?")
+        .get(poiId, businessId) as any;
+
+      if (!poi) {
+        return res.status(403).json({ error: "Không có quyền xóa POI này" });
+      }
+
+      // Can only delete if status is Pending or Rejected
+      // ✅ v1.6: Removed Draft status - now only Pending/Rejected can be deleted
+      if (poi.status !== "Pending" && poi.status !== "Rejected") {
+        return res.status(403).json({
+          error: `Không thể xóa POI với trạng thái ${poi.status}`,
+        });
+      }
+
+      // Delete image file
+      if (poi.image) {
+        try {
+          const imagePath = path.join(poisDir, poi.image);
+          fs.unlinkSync(imagePath);
+          console.log(`[FS.UNLINK] Deleted POI image: ${imagePath}`);
+        } catch (e) {
+          console.warn(`[FS.UNLINK] Warning: Could not delete POI image: ${e}`);
+        }
+      }
+
+      // Delete POI
+      db.prepare("DELETE FROM pois WHERE id = ?").run(poiId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("DELETE /api/businesses/pois/:id error:", error);
+      res.status(500).json({ error: "Lỗi xóa POI" });
+    }
+  });
+
+  // Business submits POI for approval (status: Pending → Pending with notification)
+  app.post(
+    "/api/businesses/pois/:id/submit-for-approval",
+    businessAuthMiddleware,
+    (req, res) => {
+      try {
+        const businessId = (req as any).business_id;
+        const poiId = parseInt(req.params.id);
+
+        const poi = db
+          .prepare("SELECT * FROM pois WHERE id = ? AND owner_id = ?")
+          .get(poiId, businessId) as any;
+
+        if (!poi) {
+          return res.status(404).json({ error: "POI không tìm thấy" });
+        }
+
+        // Status must be Pending or Rejected to submit
+        // ✅ v1.6: After edit, status stays Pending; or resubmit after Rejected
+        if (poi.status !== "Pending" && poi.status !== "Rejected") {
+          return res.status(400).json({
+            error: `POI với trạng thái ${poi.status} không thể gửi duyệt`,
+          });
+        }
+
+        // Update status to Pending
+        db.prepare(
+          "UPDATE pois SET status = 'Pending', reject_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        ).run(poiId);
+
+        res.json({ success: true, status: "Pending" });
+      } catch (error) {
+        console.error(
+          "POST /api/businesses/pois/:id/submit-for-approval error:",
+          error,
+        );
+        res.status(500).json({ error: "Lỗi gửi duyệt" });
+      }
+    },
+  );
+
+  // ✅ v1.6: Admin approves POI from Business (Pending → Approved) + Trigger Audio/TTS
+  app.put("/api/pois/:id/approve", authMiddleware, (req, res) => {
+    try {
+      const poiId = parseInt(req.params.id);
+
+      const poi = db
+        .prepare("SELECT * FROM pois WHERE id = ?")
+        .get(poiId) as any;
+
+      if (!poi) {
+        return res.status(404).json({ error: "POI không tìm thấy" });
+      }
+
+      // Only Pending POIs can be approved
+      if (poi.status !== "Pending") {
+        return res.status(400).json({
+          error: `POI với trạng thái ${poi.status} không thể duyệt`,
+        });
+      }
+
+      // Update status to Approved
+      db.prepare(
+        "UPDATE pois SET status = 'Approved', reject_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      ).run(poiId);
+
+      // ✅ TODO: Trigger TTS to generate audio in Tiếng Việt from poi.description
+      // For now, we just update the status. Audio generation logic can be added later.
+      console.log(
+        `[v1.6] POI ${poiId} approved. TODO: Trigger TTS for description: "${poi.description}"`,
+      );
+
+      res.json({ success: true, status: "Approved" });
+    } catch (error) {
+      console.error("PUT /api/pois/:id/approve error:", error);
+      res.status(500).json({ error: "Lỗi duyệt POI" });
+    }
+  });
+
+  // ✅ v1.6: Admin rejects POI from Business (Pending → Rejected) + Delete any existing audio
+  app.put("/api/pois/:id/reject", authMiddleware, (req, res) => {
+    try {
+      const poiId = parseInt(req.params.id);
+      const { reject_reason } = req.body;
+
+      // Reject reason is required
+      if (!reject_reason || !reject_reason.trim()) {
+        return res.status(400).json({ error: "Lý do từ chối không được rỗng" });
+      }
+
+      const poi = db
+        .prepare("SELECT * FROM pois WHERE id = ?")
+        .get(poiId) as any;
+
+      if (!poi) {
+        return res.status(404).json({ error: "POI không tìm thấy" });
+      }
+
+      // Only Pending POIs can be rejected
+      if (poi.status !== "Pending") {
+        return res.status(400).json({
+          error: `POI với trạng thái ${poi.status} không thể từ chối`,
+        });
+      }
+
+      // Update status to Rejected + save reject reason
+      db.prepare(
+        "UPDATE pois SET status = 'Rejected', reject_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      ).run(reject_reason.trim(), poiId);
+
+      // ✅ TODO: Delete any existing audio files for this POI
+      // For now, we just update the status. Audio deletion logic can be added later.
+      console.log(
+        `[v1.6] POI ${poiId} rejected. TODO: Delete audio files for this POI`,
+      );
+
+      res.json({
+        success: true,
+        status: "Rejected",
+        reject_reason: reject_reason.trim(),
+      });
+    } catch (error) {
+      console.error("PUT /api/pois/:id/reject error:", error);
+      res.status(500).json({ error: "Lỗi từ chối POI" });
+    }
+  });
+
+  // ✅ v1.6: Get all businesses (for Admin Business Management page)
+  app.get("/api/admin/businesses", authMiddleware, (req, res) => {
+    try {
+      const businesses = db
+        .prepare(
+          "SELECT id, company_name, email, phone, created_at, updated_at FROM businesses ORDER BY company_name ASC",
+        )
+        .all() as Array<any>;
+
+      // For each business, count their POIs by status
+      const formattedBusinesses = businesses.map((b: any) => {
+        const stats = db
+          .prepare(
+            `SELECT 
+              COUNT(CASE WHEN status = 'Pending' THEN 1 END) as pending_count,
+              COUNT(CASE WHEN status = 'Approved' THEN 1 END) as approved_count,
+              COUNT(CASE WHEN status = 'Rejected' THEN 1 END) as rejected_count,
+              COUNT(*) as total_count
+            FROM pois WHERE owner_id = ?`,
+          )
+          .get(b.id) as any;
+
+        return {
+          ...b,
+          poi_pending: stats.pending_count || 0,
+          poi_approved: stats.approved_count || 0,
+          poi_rejected: stats.rejected_count || 0,
+          poi_total: stats.total_count || 0,
+        };
+      });
+
+      res.json(formattedBusinesses);
+    } catch (error) {
+      console.error("GET /api/admin/businesses error:", error);
+      res.status(500).json({ error: "Lỗi tải danh sách doanh nghiệp" });
+    }
+  });
+
+  // ✅ v1.6: Get Pending POIs from all businesses (for Admin Approval page)
+  app.get("/api/admin/pois/pending", authMiddleware, (req, res) => {
+    try {
+      const pendingPois = db
+        .prepare(
+          `SELECT 
+            p.id, p.name, p.type, p.lat, p.lng, p.description, p.radius, p.image,
+            p.status, p.owner_id, p.created_at, p.updated_at,
+            b.company_name as business_name, b.email as business_email
+          FROM pois p
+          LEFT JOIN businesses b ON p.owner_id = b.id
+          WHERE p.status = 'Pending'
+          ORDER BY p.created_at ASC`,
+        )
+        .all() as Array<any>;
+
+      const formatted = pendingPois.map((p: any) => ({
+        ...p,
+        image_url: p.image
+          ? `http://localhost:3000/uploads/pois/${p.image}`
+          : null,
+      }));
+
+      res.json(formatted);
+    } catch (error) {
+      console.error("GET /api/admin/pois/pending error:", error);
+      res.status(500).json({ error: "Lỗi tải danh sách POI chờ duyệt" });
+    }
+  });
+
+  // ✅ v1.6: Get Approved POIs from a specific business
+  app.get("/api/admin/businesses/:id/pois", authMiddleware, (req, res) => {
+    try {
+      const businessId = parseInt(req.params.id);
+
+      const approvedPois = db
+        .prepare(
+          `SELECT 
+            p.id, p.name, p.type, p.lat, p.lng, p.description, p.radius, p.image,
+            p.status, p.created_at, p.updated_at
+          FROM pois p
+          WHERE p.owner_id = ? AND p.status = 'Approved'
+          ORDER BY p.created_at ASC`,
+        )
+        .all(businessId) as Array<any>;
+
+      const formatted = approvedPois.map((p: any) => ({
+        ...p,
+        image_url: p.image
+          ? `http://localhost:3000/uploads/pois/${p.image}`
+          : null,
+      }));
+
+      res.json(formatted);
+    } catch (error) {
+      console.error("GET /api/admin/businesses/:id/pois error:", error);
+      res.status(500).json({ error: "Lỗi tải danh sách POI của doanh nghiệp" });
     }
   });
 
