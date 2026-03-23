@@ -6,1570 +6,1028 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import fs from "fs";
 import bcrypt from "bcrypt";
-import businessesRouter from "./src/routes/businesses.js";
+import { spawn } from "child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const db = new Database("data.db");
 
-// ✅ FIX #10: Setup file upload storage for images (FR-02.9, FR-03.4)
+// ─── Upload directories ───────────────────────────────────────────────────────
 const uploadsDir = path.join(__dirname, "public", "uploads");
 const poisDir = path.join(uploadsDir, "pois");
 const toursDir = path.join(uploadsDir, "tours");
+const audioDir = path.join(uploadsDir, "audio");
 
-if (!fs.existsSync(poisDir)) {
-  fs.mkdirSync(poisDir, { recursive: true });
-}
-if (!fs.existsSync(toursDir)) {
-  fs.mkdirSync(toursDir, { recursive: true });
+for (const dir of [poisDir, toursDir, audioDir]) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-// ✅ PHASE 1 C1, C6: Multer storage with dynamic destination (pois vs tours)
+// ─── Multer (multi-image, max 5, 5MB each) ────────────────────────────────────
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const folder = req.path.includes("/pois") ? poisDir : toursDir;
+  destination: (req, _file, cb) => {
+    const folder = req.path.includes("/tours") ? toursDir : poisDir;
     cb(null, folder);
   },
-  filename: (req, file, cb) => {
-    // Filename format: uuid-style unique name
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+  filename: (_req, file, cb) => {
+    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, unique + path.extname(file.originalname));
   },
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
-  fileFilter: (req, file, cb) => {
-    const allowedMimes = ["image/jpeg", "image/png", "image/webp"];
-    if (!allowedMimes.includes(file.mimetype)) {
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(file.mimetype))
       return cb(new Error("Chỉ chấp nhận file JPG, PNG, WebP"));
-    }
     cb(null, true);
   },
 });
 
-// Auth config
+// ─── Config ───────────────────────────────────────────────────────────────────
 const JWT_SECRET =
   process.env.JWT_SECRET || "dev-secret-key-change-in-production";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@gmail.com";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "password";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin@123";
 
-// Initialize database
+// ─── Database ─────────────────────────────────────────────────────────────────
+const db = new Database("data.db");
+db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
+
 db.exec(`
-  CREATE TABLE IF NOT EXISTS pois (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    lat REAL NOT NULL,
-    lng REAL NOT NULL,
-    description TEXT,
-    radius INTEGER DEFAULT 0,
-    image TEXT,
-    status TEXT NOT NULL DEFAULT 'Approved',
-    owner_id INTEGER REFERENCES businesses(id),
-    reject_reason TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  -- admins
+  CREATE TABLE IF NOT EXISTS admins (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,
+    name          TEXT    NOT NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
-  CREATE TABLE IF NOT EXISTS tours (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    description TEXT,
-    image TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  -- users
+  CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,
+    email         TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,
+    language_code TEXT    NOT NULL DEFAULT 'vi',
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
-  CREATE TABLE IF NOT EXISTS tour_pois (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tour_id INTEGER NOT NULL,
-    poi_id INTEGER NOT NULL,
-    position INTEGER NOT NULL,
-    FOREIGN KEY (tour_id) REFERENCES tours(id) ON DELETE CASCADE,
-    FOREIGN KEY (poi_id) REFERENCES pois(id) ON DELETE CASCADE,
-    UNIQUE (tour_id, position)
-  );
-
+  -- businesses
   CREATE TABLE IF NOT EXISTS businesses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    company_name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    password TEXT NOT NULL,
-    phone TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,
+    email         TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- pois
+  CREATE TABLE IF NOT EXISTS pois (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    description TEXT    NOT NULL,
+    lat         REAL    NOT NULL,
+    lng         REAL    NOT NULL,
+    range_m     INTEGER NOT NULL DEFAULT 0,
+    owner_type  TEXT    NOT NULL,
+    owner_id    INTEGER NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_pois_owner    ON pois(owner_type, owner_id);
+  CREATE INDEX IF NOT EXISTS idx_pois_location ON pois(lat, lng);
+
+  -- poi_images
+  CREATE TABLE IF NOT EXISTS poi_images (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    poi_id     INTEGER NOT NULL,
+    file_path  TEXT    NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (poi_id) REFERENCES pois(id) ON DELETE CASCADE
+  );
+
+  -- poi_translations (kept for future TTS phase — not modified here)
+  CREATE TABLE IF NOT EXISTS poi_translations (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    poi_id                 INTEGER NOT NULL,
+    language_code          TEXT    NOT NULL,
+    translated_description TEXT    NOT NULL,
+    created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(poi_id, language_code),
+    FOREIGN KEY (poi_id) REFERENCES pois(id) ON DELETE CASCADE
+  );
+
+  -- poi_audio_files (kept for future TTS phase — not modified here)
+  CREATE TABLE IF NOT EXISTS poi_audio_files (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    poi_id        INTEGER NOT NULL,
+    language_code TEXT    NOT NULL,
+    version       INTEGER NOT NULL DEFAULT 0,
+    file_path     TEXT    NOT NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(poi_id, language_code),
+    FOREIGN KEY (poi_id) REFERENCES pois(id) ON DELETE CASCADE
+  );
+
+  -- tours
+  CREATE TABLE IF NOT EXISTS tours (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL,
+    description     TEXT,
+    created_by_type TEXT    NOT NULL,
+    created_by_id   INTEGER NOT NULL,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_tours_creator ON tours(created_by_type, created_by_id);
+
+  -- tour_images
+  CREATE TABLE IF NOT EXISTS tour_images (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    tour_id    INTEGER NOT NULL,
+    file_path  TEXT    NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tour_id) REFERENCES tours(id) ON DELETE CASCADE
+  );
+
+  -- tour_pois
+  CREATE TABLE IF NOT EXISTS tour_pois (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    tour_id  INTEGER NOT NULL,
+    poi_id   INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    UNIQUE(tour_id, poi_id),
+    UNIQUE(tour_id, position),
+    FOREIGN KEY (tour_id) REFERENCES tours(id) ON DELETE CASCADE,
+    FOREIGN KEY (poi_id)  REFERENCES pois(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_tour_pois_tour ON tour_pois(tour_id, position);
+  CREATE INDEX IF NOT EXISTS idx_tour_pois_poi  ON tour_pois(poi_id);
+
+  -- languages
+  CREATE TABLE IF NOT EXISTS languages (
+    code      TEXT    PRIMARY KEY,
+    name      TEXT    NOT NULL,
+    tts_voice TEXT    NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1
+  );
+  INSERT OR IGNORE INTO languages VALUES ('vi', 'Tiếng Việt',  'vi-VN-HoaiMyNeural',   1);
+  INSERT OR IGNORE INTO languages VALUES ('en', 'English',     'en-US-JennyNeural',     1);
+  INSERT OR IGNORE INTO languages VALUES ('zh', '中文',         'zh-CN-XiaoxiaoNeural',  1);
+  INSERT OR IGNORE INTO languages VALUES ('ja', '日本語',       'ja-JP-NanamiNeural',    1);
+  INSERT OR IGNORE INTO languages VALUES ('ko', '한국어',       'ko-KR-SunHiNeural',     1);
 `);
 
-// ✅ Create index for tour_pois query
-try {
-  db.exec(
-    `CREATE INDEX IF NOT EXISTS idx_tour_pois_tour ON tour_pois(tour_id, position);`,
-  );
-  console.log("[INDEX] Created idx_tour_pois_tour");
-} catch (e) {
-  // Index already exists
-}
-
-try {
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tour_pois_poi ON tour_pois(poi_id);`);
-  console.log("[INDEX] Created idx_tour_pois_poi");
-} catch (e) {
-  // Index already exists
-}
-
-// ✅ PHASE 1 C3: Migrate to new schema - add radius and image columns
-try {
-  db.exec(`ALTER TABLE pois ADD COLUMN radius INTEGER NOT NULL DEFAULT 0;`);
-  console.log("[MIGRATION] Added radius column to pois");
-} catch (e) {
-  // Column already exists
-}
-try {
-  db.exec(`ALTER TABLE pois ADD COLUMN image TEXT;`);
-  console.log("[MIGRATION] Added image column to pois");
-} catch (e) {
-  // Column already exists
-}
-try {
-  db.exec(`ALTER TABLE tours ADD COLUMN image TEXT;`);
-  console.log("[MIGRATION] Added image column to tours");
-} catch (e) {
-  // Column already exists
-}
-try {
-  db.exec(`ALTER TABLE tours ADD COLUMN description TEXT;`);
-  console.log("[MIGRATION] Added description column to tours");
-} catch (e) {
-  // Column already exists
-}
-
-// ✅ v1.4: Migrate audit timestamps
-try {
-  db.exec(
-    `ALTER TABLE pois ADD COLUMN created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
-  );
-  console.log("[MIGRATION] Added created_at column to pois");
-} catch (e) {
-  // Column already exists
-}
-try {
-  db.exec(
-    `ALTER TABLE pois ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
-  );
-  console.log("[MIGRATION] Added updated_at column to pois");
-} catch (e) {
-  // Column already exists
-}
-try {
-  db.exec(
-    `ALTER TABLE tours ADD COLUMN created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
-  );
-  console.log("[MIGRATION] Added created_at column to tours");
-} catch (e) {
-  // Column already exists
-}
-try {
-  db.exec(
-    `ALTER TABLE tours ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
-  );
-  console.log("[MIGRATION] Added updated_at column to tours");
-} catch (e) {
-  // Column already exists
-}
-
-// ✅ v1.5: Migrate pois status, owner_id, reject_reason (Business Portal support)
-try {
-  db.exec(
-    `ALTER TABLE pois ADD COLUMN status TEXT NOT NULL DEFAULT 'Approved';`,
-  );
-  console.log("[MIGRATION] Added status column to pois");
-} catch (e) {
-  // Column already exists
-}
-try {
-  db.exec(
-    `ALTER TABLE pois ADD COLUMN owner_id INTEGER REFERENCES businesses(id);`,
-  );
-  console.log("[MIGRATION] Added owner_id column to pois");
-} catch (e) {
-  // Column already exists
-}
-try {
-  db.exec(`ALTER TABLE pois ADD COLUMN reject_reason TEXT;`);
-  console.log("[MIGRATION] Added reject_reason column to pois");
-} catch (e) {
-  // Column already exists
-}
-
-// ✅ PHASE 2 C10, C14: Migrate existing tour poi_ids JSON to tour_pois table (one-time)
-try {
-  const existingTourPois =
-    (db.prepare("SELECT COUNT(*) as cnt FROM tour_pois").get() as any)?.cnt ||
-    0;
-
-  if (existingTourPois === 0) {
-    console.log("[MIGRATION] Starting tour_pois migration from JSON...");
-    const tours = db
-      .prepare("SELECT id, poi_ids FROM tours WHERE poi_ids != ''")
-      .all() as Array<{
-      id: number;
-      poi_ids: string;
-    }>;
-
-    let migratedCount = 0;
-    for (const tour of tours) {
-      try {
-        const poi_ids = JSON.parse(tour.poi_ids);
-        if (Array.isArray(poi_ids) && poi_ids.length > 0) {
-          poi_ids.forEach((poi_id: number, index: number) => {
-            db.prepare(
-              "INSERT INTO tour_pois (tour_id, poi_id, position) VALUES (?, ?, ?)",
-            ).run(tour.id, poi_id, index + 1);
-          });
-          migratedCount++;
-        }
-      } catch (e) {
-        console.warn(`[MIGRATION] Warning parsing tour ${tour.id}: ${e}`);
-      }
-    }
-    console.log(
-      `[MIGRATION] Successfully migrated ${migratedCount} tours to tour_pois table`,
+// ─── Seed default admin from env vars ─────────────────────────────────────────
+async function seedAdmin() {
+  const existing = db.prepare("SELECT id FROM admins WHERE email = ?").get(ADMIN_EMAIL);
+  if (!existing) {
+    const hash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+    db.prepare("INSERT INTO admins (email, password_hash, name) VALUES (?, ?, ?)").run(
+      ADMIN_EMAIL,
+      hash,
+      "Admin"
     );
+    console.log(`[SEED] Admin account created: ${ADMIN_EMAIL}`);
   }
-} catch (e) {
-  console.log("[MIGRATION] tour_pois migration skipped or already complete");
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function generateAudio(poiId: number, description: string) {
+  const fileName = `poi_${poiId}_vi_v0.mp3`;
+  const relativePath = `/uploads/audio/${fileName}`;
+  const absolutePath = path.join(audioDir, fileName);
+
+  const pyProcess = spawn("python", [
+    "scripts/tts.py",
+    "--text", description,
+    "--lang", "vi",
+    "--output", absolutePath
+  ]);
+
+  let stderr = "";
+  pyProcess.stderr.on("data", (data) => { stderr += data.toString(); });
+
+  pyProcess.on("close", (code) => {
+    if (code === 0) {
+      try {
+        db.prepare(`
+          INSERT INTO poi_audio_files (poi_id, language_code, version, file_path)
+          VALUES (?, 'vi', 0, ?)
+          ON CONFLICT(poi_id, language_code) 
+          DO UPDATE SET file_path=excluded.file_path, version=version+1
+        `).run(poiId, relativePath);
+        console.log(`[TTS] Generated audio for POI ${poiId} successfully at ${relativePath}`);
+      } catch (err) {
+        console.error(`[TTS] DB insert failed for POI ${poiId}:`, err);
+      }
+    } else {
+      console.error(`[TTS] Python script failed for POI ${poiId}. Code: ${code}. Error: ${stderr}`);
+    }
+  });
+}
+
+function deleteFile(filePath: string) {
+  try {
+    const abs = path.join(__dirname, "public", filePath);
+    if (fs.existsSync(abs)) fs.unlinkSync(abs);
+  } catch (e) {
+    console.warn("[FS] Could not delete:", filePath, e);
+  }
+}
+
+function getPoisWithImages(poiRows: any[]) {
+  if (!poiRows.length) return [];
+  const ids = poiRows.map((p) => p.id).join(",");
+  const images = db
+    .prepare(`SELECT * FROM poi_images WHERE poi_id IN (${ids}) ORDER BY sort_order`)
+    .all() as any[];
+  const audioFiles = db
+    .prepare(`SELECT * FROM poi_audio_files WHERE poi_id IN (${ids})`)
+    .all() as any[];
+  const translations = db
+    .prepare(`SELECT * FROM poi_translations WHERE poi_id IN (${ids})`)
+    .all() as any[];
+  return poiRows.map((p) => ({
+    ...p,
+    images: images.filter((i) => i.poi_id === p.id),
+    audio_files: audioFiles.filter((a) => a.poi_id === p.id),
+    translations: translations.filter((t) => t.poi_id === p.id),
+  }));
+}
+
+function getToursWithDetails(tourRows: any[]) {
+  if (!tourRows.length) return [];
+  const ids = tourRows.map((t) => t.id).join(",");
+  const images = db
+    .prepare(`SELECT * FROM tour_images WHERE tour_id IN (${ids}) ORDER BY sort_order`)
+    .all() as any[];
+  const pois = db
+    .prepare(
+      `SELECT tp.tour_id, tp.position, tp.poi_id, p.name, p.lat, p.lng
+       FROM tour_pois tp JOIN pois p ON tp.poi_id = p.id
+       WHERE tp.tour_id IN (${ids}) ORDER BY tp.tour_id, tp.position`
+    )
+    .all() as any[];
+  return tourRows.map((t) => ({
+    ...t,
+    images: images.filter((i) => i.tour_id === t.id),
+    pois: pois.filter((p) => p.tour_id === t.id),
+    poi_ids: pois.filter((p) => p.tour_id === t.id).map((p) => p.poi_id),
+  }));
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
 async function startServer() {
+  await seedAdmin();
+
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
-  // ✅ FIX #10: Serve static files for uploaded images (FR-02.9, FR-03.4)
   app.use("/uploads", express.static(uploadsDir));
 
-  // ✅ FIX #7: Add server logging middleware (NFR-LOG-01)
+  // Request logger
   app.use((req, res, next) => {
     const start = Date.now();
-    res.on("finish", () => {
-      const duration = Date.now() - start;
+    res.on("finish", () =>
       console.log(
-        `[${new Date().toISOString()}] ${req.method} ${req.path} ${res.statusCode} ${duration}ms`,
-      );
-    });
+        `[${new Date().toISOString()}] ${req.method} ${req.path} ${res.statusCode} ${Date.now() - start}ms`
+      )
+    );
     next();
   });
 
-  // Middleware to check auth
-  const authMiddleware = (req: any, res: any, next: any) => {
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) {
-      // ✅ FIX #7: Log auth failures
-      console.log(
-        `[AUTH] Unauthorized - no token on ${req.method} ${req.path}`,
-      );
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+  // ─── Auth Middlewares ───────────────────────────────────────────────────────
 
+  const adminAuth = (req: any, res: any, next: any) => {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
     try {
-      jwt.verify(token, JWT_SECRET);
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      if (decoded.role !== "admin")
+        return res.status(403).json({ error: "Admin access required" });
+      req.admin_id = decoded.admin_id;
       next();
-    } catch (error) {
-      console.log(
-        `[AUTH] Invalid token - ${error.message} on ${req.method} ${req.path}`,
-      );
-      res.status(401).json({ error: "Invalid token" });
+    } catch {
+      res.status(401).json({ error: "Invalid or expired token" });
     }
   };
 
-  // ✅ v1.7: Register modular business router
-  app.use("/api/businesses", businessesRouter);
-
-  // API Routes
-
-  // Auth
-  app.post("/api/auth/login", (req, res) => {
-    const { email, password } = req.body;
-
-    // Simple validation for MVP (production: use hashed password)
-    if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-      const token = jwt.sign({ email }, JWT_SECRET, { expiresIn: "24h" });
-      res.json({ token });
-    } else {
-      res.status(401).json({ error: "Sai email hoặc mật khẩu" });
-    }
-  });
-
-  // ✅ v1.5 BUSINESS AUTH ENDPOINTS
-  // Business Register
-  app.post("/api/businesses/register", async (req, res) => {
+  const businessAuth = (req: any, res: any, next: any) => {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
     try {
-      const { company_name, email, password, phone } = req.body;
-
-      // Validate input
-      if (!company_name || !company_name.trim()) {
-        return res.status(400).json({ error: "Tên công ty không được rỗng" });
-      }
-      if (!email || !email.trim()) {
-        return res.status(400).json({ error: "Email không được rỗng" });
-      }
-      if (!password || password.length < 8) {
-        return res
-          .status(400)
-          .json({ error: "Mật khẩu phải tối thiểu 8 ký tự" });
-      }
-
-      // Check if email already exists
-      const existingBusiness = db
-        .prepare("SELECT id FROM businesses WHERE email = ?")
-        .get(email);
-      if (existingBusiness) {
-        return res.status(400).json({ error: "Email đã tồn tại" });
-      }
-
-      // Hash password
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      // Insert new business
-      const result = db
-        .prepare(
-          "INSERT INTO businesses (company_name, email, password, phone) VALUES (?, ?, ?, ?)",
-        )
-        .run(company_name, email, hashedPassword, phone || null);
-
-      const businessId = result.lastInsertRowid;
-
-      // Create token
-      const token = jwt.sign(
-        { business_id: businessId, email, role: "business" },
-        JWT_SECRET,
-        { expiresIn: "24h" },
-      );
-
-      res.status(201).json({
-        business_id: businessId,
-        company_name,
-        email,
-        token,
-      });
-    } catch (error) {
-      console.error("POST /api/businesses/register error:", error);
-      res.status(500).json({ error: "Lỗi đăng ký tài khoản" });
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      if (decoded.role !== "business")
+        return res.status(403).json({ error: "Business access required" });
+      req.business_id = decoded.business_id;
+      next();
+    } catch {
+      res.status(401).json({ error: "Invalid or expired token" });
     }
-  });
+  };
 
-  // Business Login
-  app.post("/api/businesses/login", async (req, res) => {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AUTH ROUTES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Admin Login
+  app.post("/api/auth/admin/login", async (req, res) => {
     try {
       const { email, password } = req.body;
+      if (!email || !password)
+        return res.status(400).json({ error: "Email và mật khẩu không được rỗng" });
 
-      if (!email || !password) {
-        return res
-          .status(400)
-          .json({ error: "Email và mật khẩu không được rỗng" });
-      }
-
-      // Find business
-      const business = db
-        .prepare(
-          "SELECT id, company_name, email, password FROM businesses WHERE email = ?",
-        )
+      const admin = db
+        .prepare("SELECT * FROM admins WHERE email = ?")
         .get(email) as any;
 
-      if (!business) {
-        return res.status(401).json({ error: "Email hoặc mật khẩu sai" });
-      }
+      if (!admin) return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
 
-      // Verify password
-      const passwordMatch = await bcrypt.compare(password, business.password);
-      if (!passwordMatch) {
-        return res.status(401).json({ error: "Email hoặc mật khẩu sai" });
-      }
+      const match = await bcrypt.compare(password, admin.password_hash);
+      if (!match) return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
 
-      // Create token
       const token = jwt.sign(
-        { business_id: business.id, email: business.email, role: "business" },
+        { admin_id: admin.id, email: admin.email, role: "admin" },
         JWT_SECRET,
-        { expiresIn: "24h" },
+        { expiresIn: "24h" }
       );
 
       res.json({
-        business_id: business.id,
-        company_name: business.company_name,
-        email: business.email,
         token,
+        admin: { id: admin.id, name: admin.name, email: admin.email },
       });
-    } catch (error) {
-      console.error("POST /api/businesses/login error:", error);
+    } catch (e) {
+      console.error("POST /api/auth/admin/login:", e);
       res.status(500).json({ error: "Lỗi đăng nhập" });
     }
   });
 
-  // Business Logout (simple — just client-side token removal)
-  app.post("/api/businesses/logout", (req, res) => {
-    res.json({ success: true });
+  // Business Register
+  app.post("/api/auth/business/register", async (req, res) => {
+    try {
+      const { name, email, password, confirm_password } = req.body;
+
+      if (!name?.trim()) return res.status(400).json({ error: "Tên doanh nghiệp không được rỗng" });
+      if (!email?.trim()) return res.status(400).json({ error: "Email không được rỗng" });
+      if (!password || password.length < 8)
+        return res.status(400).json({ error: "Mật khẩu phải tối thiểu 8 ký tự" });
+      if (confirm_password && confirm_password !== password)
+        return res.status(400).json({ error: "Mật khẩu xác nhận không khớp" });
+
+      const existing = db.prepare("SELECT id FROM businesses WHERE email = ?").get(email);
+      if (existing) return res.status(400).json({ error: "Email đã được sử dụng" });
+
+      const hash = await bcrypt.hash(password, 10);
+      const result = db
+        .prepare("INSERT INTO businesses (name, email, password_hash) VALUES (?, ?, ?)")
+        .run(name.trim(), email.trim(), hash);
+
+      res.status(201).json({ message: "Đăng ký thành công" });
+    } catch (e) {
+      console.error("POST /api/auth/business/register:", e);
+      res.status(500).json({ error: "Lỗi đăng ký" });
+    }
   });
 
-  // ✅ v1.5 BUSINESS POI ENDPOINTS
-  // Middleware to check business auth
-  const businessAuthMiddleware = (req: any, res: any, next: any) => {
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
+  // Business Login
+  app.post("/api/auth/business/login", async (req, res) => {
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as any;
-      if (decoded.role !== "business") {
-        return res.status(403).json({ error: "Business access required" });
-      }
-      req.business_id = decoded.business_id;
-      next();
-    } catch (error) {
-      res.status(401).json({ error: "Invalid token" });
+      const { email, password } = req.body;
+      if (!email || !password)
+        return res.status(400).json({ error: "Email và mật khẩu không được rỗng" });
+
+      const biz = db
+        .prepare("SELECT * FROM businesses WHERE email = ?")
+        .get(email) as any;
+
+      if (!biz) return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
+
+      const match = await bcrypt.compare(password, biz.password_hash);
+      if (!match) return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
+
+      const token = jwt.sign(
+        { business_id: biz.id, email: biz.email, role: "business" },
+        JWT_SECRET,
+        { expiresIn: "24h" }
+      );
+
+      res.json({
+        token,
+        business: { id: biz.id, name: biz.name, email: biz.email },
+      });
+    } catch (e) {
+      console.error("POST /api/auth/business/login:", e);
+      res.status(500).json({ error: "Lỗi đăng nhập" });
     }
-  };
+  });
 
-  // Get POIs belonging to logged-in business
-  app.get("/api/businesses/pois", businessAuthMiddleware, (req, res) => {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN — DASHBOARD
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/dashboard/stats", adminAuth, (req, res) => {
     try {
-      const businessId = (req as any).business_id;
+      const total_users     = (db.prepare("SELECT COUNT(*) as c FROM users").get()     as any).c;
+      const total_businesses= (db.prepare("SELECT COUNT(*) as c FROM businesses").get()as any).c;
+      const total_pois      = (db.prepare("SELECT COUNT(*) as c FROM pois").get()      as any).c;
+      const pois_by_admin   = (db.prepare("SELECT COUNT(*) as c FROM pois WHERE owner_type='admin'").get() as any).c;
+      const pois_by_business= (db.prepare("SELECT COUNT(*) as c FROM pois WHERE owner_type='business'").get() as any).c;
+      const total_tours     = (db.prepare("SELECT COUNT(*) as c FROM tours").get()     as any).c;
+      const tours_by_admin  = (db.prepare("SELECT COUNT(*) as c FROM tours WHERE created_by_type='admin'").get() as any).c;
+      const tours_by_user   = (db.prepare("SELECT COUNT(*) as c FROM tours WHERE created_by_type='user'").get()  as any).c;
 
-      const pois = db
-        .prepare(
-          "SELECT * FROM pois WHERE owner_id = ? ORDER BY created_at DESC",
-        )
-        .all(businessId) as Array<any>;
+      res.json({
+        total_users,
+        total_businesses,
+        total_pois,
+        pois_by_admin,
+        pois_by_business,
+        total_tours,
+        tours_by_admin,
+        tours_by_user,
+      });
+    } catch (e) {
+      console.error("GET /api/admin/dashboard/stats:", e);
+      res.status(500).json({ error: "Lỗi tải thống kê" });
+    }
+  });
 
-      const formatted = pois.map((p: any) => ({
-        ...p,
-        image_url: p.image
-          ? `http://localhost:3000/uploads/pois/${p.image}`
-          : null,
-      }));
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN — POI MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
 
-      res.json(formatted);
-    } catch (error) {
-      console.error("GET /api/businesses/pois error:", error);
+  // GET all POIs (admin + business)
+  app.get("/api/admin/pois", adminAuth, (req, res) => {
+    try {
+      const search = (req.query.search as string) || "";
+      const rows = search
+        ? (db
+            .prepare("SELECT * FROM pois WHERE LOWER(name) LIKE LOWER(?) ORDER BY created_at DESC")
+            .all(`%${search}%`) as any[])
+        : (db.prepare("SELECT * FROM pois ORDER BY created_at DESC").all() as any[]);
+
+      res.json(getPoisWithImages(rows));
+    } catch (e) {
+      console.error("GET /api/admin/pois:", e);
       res.status(500).json({ error: "Lỗi tải danh sách POI" });
     }
   });
 
-  // Business creates new POI (status = Pending)
+  // POST create admin POI
   app.post(
-    "/api/businesses/pois",
-    businessAuthMiddleware,
-    upload.single("image"),
-    (req, res) => {
+    "/api/admin/pois",
+    adminAuth,
+    upload.array("images", 5),
+    async (req: any, res) => {
       try {
-        const businessId = (req as any).business_id;
-        const { name, type, lat, lng, description, radius } = req.body;
+        const { name, description, lat, lng, range_m } = req.body;
 
-        // Validate POI data
-        if (!name || !name.trim()) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Tên điểm không được rỗng" });
-        }
-
-        if (
-          !type ||
-          !["Chính", "WC", "Bán vé", "Gửi xe", "Bến thuyền"].includes(type)
-        ) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Loại điểm không hợp lệ" });
-        }
+        if (!name?.trim())
+          return res.status(400).json({ error: "Tên POI không được rỗng", fields: { name: "required" } });
+        if (!description?.trim())
+          return res.status(400).json({ error: "Mô tả không được rỗng", fields: { description: "required" } });
 
         const latNum = parseFloat(lat);
         const lngNum = parseFloat(lng);
+        if (isNaN(latNum) || latNum < -90 || latNum > 90)
+          return res.status(400).json({ error: "Vĩ độ không hợp lệ" });
+        if (isNaN(lngNum) || lngNum < -180 || lngNum > 180)
+          return res.status(400).json({ error: "Kinh độ không hợp lệ" });
 
-        if (typeof latNum !== "number" || typeof lngNum !== "number") {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Tọa độ phải là số" });
-        }
+        const rangeNum = range_m ? parseInt(range_m) : 0;
 
-        if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Tọa độ ngoài phạm vi hợp lệ" });
-        }
-
-        const radiusNum = radius ? parseInt(radius) : 0;
-        if (!Number.isInteger(radiusNum) || radiusNum < 0) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res
-            .status(400)
-            .json({ error: "Bán kính phải là số nguyên ≥ 0" });
-        }
-
-        const imageFilename = req.file ? req.file.filename : null;
-
-        // ✅ v1.6: Insert with status='Pending' (no Draft) — doanh nghiệp gửi duyệt ngay
         const info = db
           .prepare(
-            "INSERT INTO pois (name, type, lat, lng, description, radius, image, status, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', ?)",
+            "INSERT INTO pois (name, description, lat, lng, range_m, owner_type, owner_id) VALUES (?, ?, ?, ?, ?, 'admin', ?)"
           )
-          .run(
-            name,
-            type,
-            latNum,
-            lngNum,
-            description || null,
-            radiusNum,
-            imageFilename,
-            businessId,
-          );
+          .run(name.trim(), description.trim(), latNum, lngNum, rangeNum, req.admin_id);
 
-        const createdPoi = db
-          .prepare(
-            "SELECT id, created_at, updated_at, status FROM pois WHERE id = ?",
-          )
-          .get(info.lastInsertRowid) as any;
+        const poiId = info.lastInsertRowid as number;
 
-        res.status(201).json({
-          id: createdPoi.id,
-          status: createdPoi.status,
-          created_at: createdPoi.created_at,
-          updated_at: createdPoi.updated_at,
+        // Insert images
+        const files = (req.files as Express.Multer.File[]) || [];
+        files.forEach((f, idx) => {
+          db.prepare(
+            "INSERT INTO poi_images (poi_id, file_path, sort_order) VALUES (?, ?, ?)"
+          ).run(poiId, `/uploads/pois/${f.filename}`, idx);
         });
-      } catch (error) {
-        console.error("POST /api/businesses/pois error:", error);
-        if ((req as any).file) {
-          try {
-            fs.unlinkSync((req as any).file.path);
-          } catch (e) {
-            console.warn("Failed to cleanup file after error");
-          }
-        }
-        res.status(500).json({ error: "Lỗi tạo điểm" });
+
+        // Gọi TTS sinh audio không chặn (Async)
+        generateAudio(poiId, description.trim());
+
+        const created = db.prepare("SELECT * FROM pois WHERE id = ?").get(poiId) as any;
+        const images  = db.prepare("SELECT * FROM poi_images WHERE poi_id = ?").all(poiId) as any[];
+        res.status(201).json({ ...created, images, audio_files: [], translations: [] });
+      } catch (e) {
+        console.error("POST /api/admin/pois:", e);
+        res.status(500).json({ error: "Lỗi tạo POI" });
       }
-    },
+    }
   );
 
-  // Business edits their own POI (only if status = Draft or Rejected)
+  // PUT update admin POI
   app.put(
-    "/api/businesses/pois/:id",
-    businessAuthMiddleware,
-    upload.single("image"),
-    (req, res) => {
+    "/api/admin/pois/:id",
+    adminAuth,
+    upload.array("new_images", 5),
+    async (req: any, res) => {
       try {
-        const businessId = (req as any).business_id;
         const poiId = parseInt(req.params.id);
-        const { name, type, lat, lng, description, radius, remove_image } =
-          req.body;
+        const poi = db.prepare("SELECT * FROM pois WHERE id = ?").get(poiId) as any;
+        if (!poi) return res.status(404).json({ error: "POI không tồn tại" });
+        if (poi.owner_type !== "admin" || poi.owner_id !== req.admin_id)
+          return res.status(403).json({ error: "Không có quyền sửa POI này" });
 
-        // Check ownership
-        const poi = db
-          .prepare("SELECT * FROM pois WHERE id = ? AND owner_id = ?")
-          .get(poiId, businessId) as any;
+        const { name, description, lat, lng, range_m, delete_image_ids } = req.body;
 
-        if (!poi) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res
-            .status(403)
-            .json({ error: "Không có quyền chỉnh sửa POI này" });
-        }
-
-        // Can only edit if status is Pending or Rejected
-        // ✅ v1.6: Removed Draft status - now only Pending/Rejected can be edited
-        if (poi.status !== "Pending" && poi.status !== "Rejected") {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(403).json({
-            error: `Không thể chỉnh sửa POI với trạng thái ${poi.status}`,
-          });
-        }
-
-        // Validate input
-        if (!name || !name.trim()) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Tên điểm không được rỗng" });
-        }
-
-        if (
-          !type ||
-          !["Chính", "WC", "Bán vé", "Gửi xe", "Bến thuyền"].includes(type)
-        ) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Loại điểm không hợp lệ" });
-        }
-
-        const latNum = parseFloat(lat);
-        const lngNum = parseFloat(lng);
-
-        if (typeof latNum !== "number" || typeof lngNum !== "number") {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Tọa độ phải là số" });
-        }
-
-        if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Tọa độ ngoài phạm vi hợp lệ" });
-        }
-
-        const radiusNum = radius ? parseInt(radius) : 0;
-        if (!Number.isInteger(radiusNum) || radiusNum < 0) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res
-            .status(400)
-            .json({ error: "Bán kính phải là số nguyên ≥ 0" });
-        }
-
-        // Handle image
-        if (remove_image === "true" && poi.image) {
-          try {
-            const imagePath = path.join(poisDir, poi.image);
-            fs.unlinkSync(imagePath);
-            console.log(`[FS.UNLINK] Removed POI image: ${imagePath}`);
-          } catch (e) {
-            console.warn(
-              `[FS.UNLINK] Warning: Could not delete POI image: ${e}`,
-            );
-          }
-        } else if (req.file && poi.image) {
-          try {
-            const imagePath = path.join(poisDir, poi.image);
-            fs.unlinkSync(imagePath);
-            console.log(`[FS.UNLINK] Replaced POI image: ${imagePath}`);
-          } catch (e) {
-            console.warn(
-              `[FS.UNLINK] Warning: Could not delete old POI image: ${e}`,
-            );
-          }
-        }
-
-        const imageFilename = req.file
-          ? req.file.filename
-          : remove_image === "true"
-            ? null
-            : poi.image;
+        const latNum  = lat  !== undefined ? parseFloat(lat)  : poi.lat;
+        const lngNum  = lng  !== undefined ? parseFloat(lng)  : poi.lng;
+        const rangeNum= range_m !== undefined ? parseInt(range_m) : poi.range_m;
+        const nameVal = name?.trim() || poi.name;
+        const descVal = description?.trim() || poi.description;
 
         db.prepare(
-          "UPDATE pois SET name = ?, type = ?, lat = ?, lng = ?, description = ?, radius = ?, image = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        ).run(
-          name,
-          type,
-          latNum,
-          lngNum,
-          description || null,
-          radiusNum,
-          imageFilename,
-          poiId,
-        );
+          "UPDATE pois SET name=?, description=?, lat=?, lng=?, range_m=?, updated_at=CURRENT_TIMESTAMP WHERE id=?"
+        ).run(nameVal, descVal, latNum, lngNum, rangeNum, poiId);
 
-        const updatedPoi = db
-          .prepare("SELECT updated_at FROM pois WHERE id = ?")
-          .get(poiId) as any;
-
-        res.json({ success: true, updated_at: updatedPoi.updated_at });
-      } catch (error) {
-        console.error("PUT /api/businesses/pois/:id error:", error);
-        if ((req as any).file) {
-          try {
-            fs.unlinkSync((req as any).file.path);
-          } catch (e) {
-            console.warn("Failed to cleanup file after error");
+        // Handle image deletions
+        if (delete_image_ids) {
+          const ids: number[] = Array.isArray(delete_image_ids)
+            ? delete_image_ids.map(Number)
+            : [Number(delete_image_ids)];
+          for (const imgId of ids) {
+            const img = db.prepare("SELECT file_path FROM poi_images WHERE id=? AND poi_id=?").get(imgId, poiId) as any;
+            if (img) {
+              deleteFile(img.file_path);
+              db.prepare("DELETE FROM poi_images WHERE id=?").run(imgId);
+            }
           }
         }
+
+        // Add new images
+        const files = (req.files as Express.Multer.File[]) || [];
+        const currentCount = (db.prepare("SELECT COUNT(*) as c FROM poi_images WHERE poi_id=?").get(poiId) as any).c;
+        const allowedNew = 5 - currentCount;
+        files.slice(0, allowedNew).forEach((f, idx) => {
+          db.prepare(
+            "INSERT INTO poi_images (poi_id, file_path, sort_order) VALUES (?, ?, ?)"
+          ).run(poiId, `/uploads/pois/${f.filename}`, currentCount + idx);
+        });
+
+        // NOTE: TTS bypass — audio/translations NOT modified here
+
+        res.json({ success: true });
+      } catch (e) {
+        console.error("PUT /api/admin/pois/:id:", e);
         res.status(500).json({ error: "Lỗi cập nhật POI" });
       }
-    },
+    }
   );
 
-  // Business deletes their own POI (only if status = Draft or Rejected)
-  app.delete("/api/businesses/pois/:id", businessAuthMiddleware, (req, res) => {
+  // DELETE admin POI
+  app.delete("/api/admin/pois/:id", adminAuth, (req: any, res) => {
     try {
-      const businessId = (req as any).business_id;
       const poiId = parseInt(req.params.id);
+      const poi = db.prepare("SELECT * FROM pois WHERE id = ?").get(poiId) as any;
+      if (!poi) return res.status(404).json({ error: "POI không tồn tại" });
 
-      if (!poiId) {
-        return res.status(400).json({ error: "POI ID không hợp lệ" });
-      }
-
-      // Check ownership
-      const poi = db
-        .prepare("SELECT * FROM pois WHERE id = ? AND owner_id = ?")
-        .get(poiId, businessId) as any;
-
-      if (!poi) {
-        return res.status(403).json({ error: "Không có quyền xóa POI này" });
-      }
-
-      // Can only delete if status is Pending or Rejected
-      // ✅ v1.6: Removed Draft status - now only Pending/Rejected can be deleted
-      if (poi.status !== "Pending" && poi.status !== "Rejected") {
-        return res.status(403).json({
-          error: `Không thể xóa POI với trạng thái ${poi.status}`,
+      // Check if POI is in any tour
+      const tours = db
+        .prepare(
+          `SELECT t.id, t.name FROM tour_pois tp
+           JOIN tours t ON t.id = tp.tour_id
+           WHERE tp.poi_id = ?`
+        )
+        .all(poiId) as any[];
+      if (tours.length > 0)
+        return res.status(409).json({
+          error: "Không thể xóa POI đang nằm trong Tour",
+          tours: tours.map((t) => ({ id: t.id, name: t.name })),
         });
-      }
 
-      // Delete image file
-      if (poi.image) {
-        try {
-          const imagePath = path.join(poisDir, poi.image);
-          fs.unlinkSync(imagePath);
-          console.log(`[FS.UNLINK] Deleted POI image: ${imagePath}`);
-        } catch (e) {
-          console.warn(`[FS.UNLINK] Warning: Could not delete POI image: ${e}`);
-        }
-      }
+      // Delete images
+      const images = db.prepare("SELECT file_path FROM poi_images WHERE poi_id=?").all(poiId) as any[];
+      images.forEach((img) => deleteFile(img.file_path));
 
-      // Delete POI
-      db.prepare("DELETE FROM pois WHERE id = ?").run(poiId);
+      // Delete audio files
+      const audios = db.prepare("SELECT file_path FROM poi_audio_files WHERE poi_id=?").all(poiId) as any[];
+      audios.forEach((a) => deleteFile(a.file_path));
+
+      db.prepare("DELETE FROM pois WHERE id=?").run(poiId);
       res.json({ success: true });
-    } catch (error) {
-      console.error("DELETE /api/businesses/pois/:id error:", error);
+    } catch (e) {
+      console.error("DELETE /api/admin/pois/:id:", e);
       res.status(500).json({ error: "Lỗi xóa POI" });
     }
   });
 
-  // Business submits POI for approval (status: Pending → Pending with notification)
+  // DELETE business POI (by admin)
+  app.delete("/api/admin/pois/business/:poi_id", adminAuth, (req: any, res) => {
+    try {
+      const poiId = parseInt(req.params.poi_id);
+      const poi = db.prepare("SELECT * FROM pois WHERE id=? AND owner_type='business'").get(poiId) as any;
+      if (!poi) return res.status(404).json({ error: "POI không tồn tại" });
+
+      const tours = db
+        .prepare(
+          `SELECT t.id, t.name FROM tour_pois tp
+           JOIN tours t ON t.id = tp.tour_id
+           WHERE tp.poi_id = ?`
+        )
+        .all(poiId) as any[];
+      if (tours.length > 0)
+        return res.status(409).json({
+          error: "Không thể xóa POI đang nằm trong Tour",
+          tours,
+        });
+
+      const images = db.prepare("SELECT file_path FROM poi_images WHERE poi_id=?").all(poiId) as any[];
+      images.forEach((img) => deleteFile(img.file_path));
+
+      db.prepare("DELETE FROM pois WHERE id=?").run(poiId);
+      res.json({ success: true });
+    } catch (e) {
+      console.error("DELETE /api/admin/pois/business/:poi_id:", e);
+      res.status(500).json({ error: "Lỗi xóa POI doanh nghiệp" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN — TOUR MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // GET all tours
+  app.get("/api/admin/tours", adminAuth, (_req, res) => {
+    try {
+      const rows = db
+        .prepare("SELECT * FROM tours WHERE created_by_type='admin' ORDER BY created_at DESC")
+        .all() as any[];
+      res.json(getToursWithDetails(rows));
+    } catch (e) {
+      console.error("GET /api/admin/tours:", e);
+      res.status(500).json({ error: "Lỗi tải danh sách Tour" });
+    }
+  });
+
+  // POST create tour
   app.post(
-    "/api/businesses/pois/:id/submit-for-approval",
-    businessAuthMiddleware,
-    (req, res) => {
+    "/api/admin/tours",
+    adminAuth,
+    upload.array("images", 5),
+    (req: any, res) => {
       try {
-        const businessId = (req as any).business_id;
-        const poiId = parseInt(req.params.id);
+        const { name, description, poi_ids } = req.body;
+        if (!name?.trim())
+          return res.status(400).json({ error: "Tên Tour không được rỗng" });
 
-        const poi = db
-          .prepare("SELECT * FROM pois WHERE id = ? AND owner_id = ?")
-          .get(poiId, businessId) as any;
-
-        if (!poi) {
-          return res.status(404).json({ error: "POI không tìm thấy" });
+        let poiIdsArr: number[] = [];
+        try {
+          poiIdsArr = JSON.parse(poi_ids || "[]");
+        } catch {
+          return res.status(400).json({ error: "poi_ids không hợp lệ" });
         }
+        if (!poiIdsArr.length)
+          return res.status(400).json({ error: "Tour phải có ít nhất 1 POI" });
 
-        // Status must be Pending or Rejected to submit
-        // ✅ v1.6: After edit, status stays Pending; or resubmit after Rejected
-        if (poi.status !== "Pending" && poi.status !== "Rejected") {
-          return res.status(400).json({
-            error: `POI với trạng thái ${poi.status} không thể gửi duyệt`,
+        const info = db
+          .prepare(
+            "INSERT INTO tours (name, description, created_by_type, created_by_id) VALUES (?, ?, 'admin', ?)"
+          )
+          .run(name.trim(), description?.trim() || null, req.admin_id);
+
+        const tourId = info.lastInsertRowid as number;
+
+        // Insert tour_pois
+        poiIdsArr.forEach((poiId, idx) => {
+          db.prepare("INSERT INTO tour_pois (tour_id, poi_id, position) VALUES (?, ?, ?)").run(
+            tourId, poiId, idx + 1
+          );
+        });
+
+        // Insert images
+        const files = (req.files as Express.Multer.File[]) || [];
+        files.forEach((f, idx) => {
+          db.prepare(
+            "INSERT INTO tour_images (tour_id, file_path, sort_order) VALUES (?, ?, ?)"
+          ).run(tourId, `/uploads/tours/${f.filename}`, idx);
+        });
+
+        const created = db.prepare("SELECT * FROM tours WHERE id=?").get(tourId);
+        res.status(201).json(
+          getToursWithDetails([created as any])[0]
+        );
+      } catch (e) {
+        console.error("POST /api/admin/tours:", e);
+        res.status(500).json({ error: "Lỗi tạo Tour" });
+      }
+    }
+  );
+
+  // PUT update tour
+  app.put(
+    "/api/admin/tours/:id",
+    adminAuth,
+    upload.array("new_images", 5),
+    (req: any, res) => {
+      try {
+        const tourId = parseInt(req.params.id);
+        const tour = db.prepare("SELECT * FROM tours WHERE id=?").get(tourId) as any;
+        if (!tour) return res.status(404).json({ error: "Tour không tồn tại" });
+
+        const { name, description, poi_ids, delete_image_ids } = req.body;
+
+        db.prepare(
+          "UPDATE tours SET name=?, description=?, updated_at=CURRENT_TIMESTAMP WHERE id=?"
+        ).run(
+          name?.trim() || tour.name,
+          description !== undefined ? (description?.trim() || null) : tour.description,
+          tourId
+        );
+
+        // Update POIs if provided
+        if (poi_ids !== undefined) {
+          let poiIdsArr: number[] = [];
+          try { poiIdsArr = JSON.parse(poi_ids); } catch {}
+          db.prepare("DELETE FROM tour_pois WHERE tour_id=?").run(tourId);
+          poiIdsArr.forEach((poiId, idx) => {
+            db.prepare("INSERT INTO tour_pois (tour_id, poi_id, position) VALUES (?, ?, ?)").run(
+              tourId, poiId, idx + 1
+            );
           });
         }
 
-        // Update status to Pending
-        db.prepare(
-          "UPDATE pois SET status = 'Pending', reject_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        ).run(poiId);
+        // Handle image deletions
+        if (delete_image_ids) {
+          const ids: number[] = Array.isArray(delete_image_ids)
+            ? delete_image_ids.map(Number)
+            : [Number(delete_image_ids)];
+          for (const imgId of ids) {
+            const img = db.prepare("SELECT file_path FROM tour_images WHERE id=? AND tour_id=?").get(imgId, tourId) as any;
+            if (img) {
+              deleteFile(img.file_path);
+              db.prepare("DELETE FROM tour_images WHERE id=?").run(imgId);
+            }
+          }
+        }
 
-        res.json({ success: true, status: "Pending" });
-      } catch (error) {
-        console.error(
-          "POST /api/businesses/pois/:id/submit-for-approval error:",
-          error,
-        );
-        res.status(500).json({ error: "Lỗi gửi duyệt" });
+        // Add new images
+        const files = (req.files as Express.Multer.File[]) || [];
+        const currentCount = (db.prepare("SELECT COUNT(*) as c FROM tour_images WHERE tour_id=?").get(tourId) as any).c;
+        files.slice(0, 5 - currentCount).forEach((f, idx) => {
+          db.prepare("INSERT INTO tour_images (tour_id, file_path, sort_order) VALUES (?, ?, ?)").run(
+            tourId, `/uploads/tours/${f.filename}`, currentCount + idx
+          );
+        });
+
+        res.json({ success: true });
+      } catch (e) {
+        console.error("PUT /api/admin/tours/:id:", e);
+        res.status(500).json({ error: "Lỗi cập nhật Tour" });
       }
-    },
+    }
   );
 
-  // ✅ v1.6: Admin approves POI from Business (Pending → Approved) + Trigger Audio/TTS
-  app.put("/api/pois/:id/approve", authMiddleware, (req, res) => {
+  // DELETE tour
+  app.delete("/api/admin/tours/:id", adminAuth, (_req, res) => {
     try {
-      const poiId = parseInt(req.params.id);
+      const tourId = parseInt(_req.params.id);
+      const tour = db.prepare("SELECT * FROM tours WHERE id=?").get(tourId) as any;
+      if (!tour) return res.status(404).json({ error: "Tour không tồn tại" });
 
-      const poi = db
-        .prepare("SELECT * FROM pois WHERE id = ?")
-        .get(poiId) as any;
+      const images = db.prepare("SELECT file_path FROM tour_images WHERE tour_id=?").all(tourId) as any[];
+      images.forEach((img) => deleteFile(img.file_path));
 
-      if (!poi) {
-        return res.status(404).json({ error: "POI không tìm thấy" });
-      }
-
-      // Only Pending POIs can be approved
-      if (poi.status !== "Pending") {
-        return res.status(400).json({
-          error: `POI với trạng thái ${poi.status} không thể duyệt`,
-        });
-      }
-
-      // Update status to Approved
-      db.prepare(
-        "UPDATE pois SET status = 'Approved', reject_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-      ).run(poiId);
-
-      // ✅ TODO: Trigger TTS to generate audio in Tiếng Việt from poi.description
-      // For now, we just update the status. Audio generation logic can be added later.
-      console.log(
-        `[v1.6] POI ${poiId} approved. TODO: Trigger TTS for description: "${poi.description}"`,
-      );
-
-      res.json({ success: true, status: "Approved" });
-    } catch (error) {
-      console.error("PUT /api/pois/:id/approve error:", error);
-      res.status(500).json({ error: "Lỗi duyệt POI" });
+      db.prepare("DELETE FROM tours WHERE id=?").run(tourId);
+      res.json({ success: true });
+    } catch (e) {
+      console.error("DELETE /api/admin/tours/:id:", e);
+      res.status(500).json({ error: "Lỗi xóa Tour" });
     }
   });
 
-  // ✅ v1.6: Admin rejects POI from Business (Pending → Rejected) + Delete any existing audio
-  app.put("/api/pois/:id/reject", authMiddleware, (req, res) => {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN — BUSINESS MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/businesses", adminAuth, (req, res) => {
     try {
-      const poiId = parseInt(req.params.id);
-      const { reject_reason } = req.body;
+      const search = (req.query.search as string) || "";
+      const rows = search
+        ? (db
+            .prepare(
+              `SELECT b.*, (SELECT COUNT(*) FROM pois p WHERE p.owner_id=b.id AND p.owner_type='business') as poi_count
+               FROM businesses b WHERE LOWER(b.name) LIKE LOWER(?) ORDER BY b.created_at DESC`
+            )
+            .all(`%${search}%`) as any[])
+        : (db
+            .prepare(
+              `SELECT b.*, (SELECT COUNT(*) FROM pois p WHERE p.owner_id=b.id AND p.owner_type='business') as poi_count
+               FROM businesses b ORDER BY b.created_at DESC`
+            )
+            .all() as any[]);
 
-      // Reject reason is required
-      if (!reject_reason || !reject_reason.trim()) {
-        return res.status(400).json({ error: "Lý do từ chối không được rỗng" });
-      }
-
-      const poi = db
-        .prepare("SELECT * FROM pois WHERE id = ?")
-        .get(poiId) as any;
-
-      if (!poi) {
-        return res.status(404).json({ error: "POI không tìm thấy" });
-      }
-
-      // Only Pending POIs can be rejected
-      if (poi.status !== "Pending") {
-        return res.status(400).json({
-          error: `POI với trạng thái ${poi.status} không thể từ chối`,
-        });
-      }
-
-      // Update status to Rejected + save reject reason
-      db.prepare(
-        "UPDATE pois SET status = 'Rejected', reject_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-      ).run(reject_reason.trim(), poiId);
-
-      // ✅ TODO: Delete any existing audio files for this POI
-      // For now, we just update the status. Audio deletion logic can be added later.
-      console.log(
-        `[v1.6] POI ${poiId} rejected. TODO: Delete audio files for this POI`,
-      );
-
-      res.json({
-        success: true,
-        status: "Rejected",
-        reject_reason: reject_reason.trim(),
-      });
-    } catch (error) {
-      console.error("PUT /api/pois/:id/reject error:", error);
-      res.status(500).json({ error: "Lỗi từ chối POI" });
-    }
-  });
-
-  // ✅ v1.6: Get all businesses (for Admin Business Management page)
-  app.get("/api/admin/businesses", authMiddleware, (req, res) => {
-    try {
-      const businesses = db
-        .prepare(
-          "SELECT id, company_name, email, phone, created_at, updated_at FROM businesses ORDER BY company_name ASC",
-        )
-        .all() as Array<any>;
-
-      // For each business, count their POIs by status
-      const formattedBusinesses = businesses.map((b: any) => {
-        const stats = db
-          .prepare(
-            `SELECT 
-              COUNT(CASE WHEN status = 'Pending' THEN 1 END) as pending_count,
-              COUNT(CASE WHEN status = 'Approved' THEN 1 END) as approved_count,
-              COUNT(CASE WHEN status = 'Rejected' THEN 1 END) as rejected_count,
-              COUNT(*) as total_count
-            FROM pois WHERE owner_id = ?`,
-          )
-          .get(b.id) as any;
-
-        return {
-          ...b,
-          poi_pending: stats.pending_count || 0,
-          poi_approved: stats.approved_count || 0,
-          poi_rejected: stats.rejected_count || 0,
-          poi_total: stats.total_count || 0,
-        };
-      });
-
-      res.json(formattedBusinesses);
-    } catch (error) {
-      console.error("GET /api/admin/businesses error:", error);
+      res.json(rows.map((b) => ({ id: b.id, name: b.name, email: b.email, created_at: b.created_at, poi_count: b.poi_count })));
+    } catch (e) {
+      console.error("GET /api/admin/businesses:", e);
       res.status(500).json({ error: "Lỗi tải danh sách doanh nghiệp" });
     }
   });
 
-  // ✅ v1.6: Get Pending POIs from all businesses (for Admin Approval page)
-  app.get("/api/admin/pois/pending", authMiddleware, (req, res) => {
+  app.get("/api/admin/businesses/:id", adminAuth, (req, res) => {
     try {
-      const pendingPois = db
-        .prepare(
-          `SELECT 
-            p.id, p.name, p.type, p.lat, p.lng, p.description, p.radius, p.image,
-            p.status, p.owner_id, p.created_at, p.updated_at,
-            b.company_name as business_name, b.email as business_email
-          FROM pois p
-          LEFT JOIN businesses b ON p.owner_id = b.id
-          WHERE p.status = 'Pending'
-          ORDER BY p.created_at ASC`,
-        )
-        .all() as Array<any>;
+      const bizId = parseInt(req.params.id);
+      const biz = db.prepare("SELECT id, name, email, created_at FROM businesses WHERE id=?").get(bizId) as any;
+      if (!biz) return res.status(404).json({ error: "Doanh nghiệp không tồn tại" });
 
-      const formatted = pendingPois.map((p: any) => ({
-        ...p,
-        image_url: p.image
-          ? `http://localhost:3000/uploads/pois/${p.image}`
-          : null,
-      }));
+      const poiRows = db
+        .prepare("SELECT * FROM pois WHERE owner_type='business' AND owner_id=? ORDER BY created_at DESC")
+        .all(bizId) as any[];
 
-      res.json(formatted);
-    } catch (error) {
-      console.error("GET /api/admin/pois/pending error:", error);
-      res.status(500).json({ error: "Lỗi tải danh sách POI chờ duyệt" });
+      res.json({ ...biz, pois: getPoisWithImages(poiRows) });
+    } catch (e) {
+      console.error("GET /api/admin/businesses/:id:", e);
+      res.status(500).json({ error: "Lỗi tải thông tin doanh nghiệp" });
     }
   });
 
-  // ✅ v1.6: Get Approved POIs from a specific business
-  app.get("/api/admin/businesses/:id/pois", authMiddleware, (req, res) => {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BUSINESS — POI MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/business/pois", businessAuth, (req: any, res) => {
     try {
-      const businessId = parseInt(req.params.id);
+      const search = (req.query.search as string) || "";
+      const rows = search
+        ? (db
+            .prepare(
+              "SELECT * FROM pois WHERE owner_type='business' AND owner_id=? AND LOWER(name) LIKE LOWER(?) ORDER BY created_at DESC"
+            )
+            .all(req.business_id, `%${search}%`) as any[])
+        : (db
+            .prepare(
+              "SELECT * FROM pois WHERE owner_type='business' AND owner_id=? ORDER BY created_at DESC"
+            )
+            .all(req.business_id) as any[]);
 
-      const approvedPois = db
-        .prepare(
-          `SELECT 
-            p.id, p.name, p.type, p.lat, p.lng, p.description, p.radius, p.image,
-            p.status, p.created_at, p.updated_at
-          FROM pois p
-          WHERE p.owner_id = ? AND p.status = 'Approved'
-          ORDER BY p.created_at ASC`,
-        )
-        .all(businessId) as Array<any>;
-
-      const formatted = approvedPois.map((p: any) => ({
-        ...p,
-        image_url: p.image
-          ? `http://localhost:3000/uploads/pois/${p.image}`
-          : null,
-      }));
-
-      res.json(formatted);
-    } catch (error) {
-      console.error("GET /api/admin/businesses/:id/pois error:", error);
-      res.status(500).json({ error: "Lỗi tải danh sách POI của doanh nghiệp" });
+      res.json(getPoisWithImages(rows));
+    } catch (e) {
+      console.error("GET /api/business/pois:", e);
+      res.status(500).json({ error: "Lỗi tải danh sách POI" });
     }
   });
 
-  // POIs
-  app.get("/api/pois", authMiddleware, (req, res) => {
-    try {
-      const pois = db.prepare("SELECT * FROM pois").all();
-      const formatted = pois.map((p: any) => ({
-        ...p,
-      }));
-      res.json(formatted);
-    } catch (error) {
-      console.error("GET /api/pois error:", error);
-      res.status(500).json({ error: "Lỗi tải POI" });
-    }
-  });
-
-  app.post("/api/pois", authMiddleware, upload.single("image"), (req, res) => {
-    try {
-      const { name, type, lat, lng, description, radius } = req.body;
-
-      // ✅ FIX: Validate POI data
-      if (!name || !name.trim()) {
-        if (req.file) fs.unlinkSync(req.file.path); // Clean up uploaded file if validation fails
-        return res.status(400).json({ error: "POI name không được rỗng" });
-      }
-
-      if (
-        !type ||
-        !["Chính", "WC", "Bán vé", "Gửi xe", "Bến thuyền"].includes(type)
-      ) {
-        if (req.file) fs.unlinkSync(req.file.path);
-        return res.status(400).json({ error: "POI type không hợp lệ" });
-      }
-
-      const latNum = parseFloat(lat);
-      const lngNum = parseFloat(lng);
-
-      if (typeof latNum !== "number" || typeof lngNum !== "number") {
-        if (req.file) fs.unlinkSync(req.file.path);
-        return res.status(400).json({ error: "Tọa độ phải là số" });
-      }
-
-      if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
-        if (req.file) fs.unlinkSync(req.file.path);
-        return res.status(400).json({ error: "Tọa độ ngoài phạm vi hợp lệ" });
-      }
-
-      // ✅ PHASE 1 C3: Validate radius if provided
-      const radiusNum = radius ? parseInt(radius) : 0;
-      if (!Number.isInteger(radiusNum) || radiusNum < 0) {
-        if (req.file) fs.unlinkSync(req.file.path);
-        return res
-          .status(400)
-          .json({ error: "Bán kính phải là số nguyên ≥ 0" });
-      }
-
-      // ✅ PHASE 1 C1: Store only filename, not full path
-      const imageFilename = req.file ? req.file.filename : null;
-
-      const info = db
-        .prepare(
-          "INSERT INTO pois (name, type, lat, lng, description, radius, image) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .run(
-          name,
-          type,
-          latNum,
-          lngNum,
-          description || null,
-          radiusNum,
-          imageFilename,
-        );
-
-      // ✅ v1.4: Fetch created_at, updated_at from database
-      const createdPoi = db
-        .prepare("SELECT created_at, updated_at FROM pois WHERE id = ?")
-        .get(info.lastInsertRowid) as any;
-
-      res.status(201).json({
-        id: info.lastInsertRowid,
-        created_at: createdPoi?.created_at || null,
-        updated_at: createdPoi?.updated_at || null,
-      });
-    } catch (error) {
-      console.error("POST /api/pois error:", error);
-      // Clean up file if error occurs
-      if ((error as any).type === "MULTER_ERROR" && (req as any).file) {
-        try {
-          fs.unlinkSync((req as any).file.path);
-        } catch (e) {
-          console.warn("Failed to cleanup file after error");
-        }
-      }
-      res.status(500).json({ error: "Lỗi tạo POI" });
-    }
-  });
-
-  app.put(
-    "/api/pois/:id",
-    authMiddleware,
-    upload.single("image"),
-    (req, res) => {
+  app.post(
+    "/api/business/pois",
+    businessAuth,
+    upload.array("images", 5),
+    async (req: any, res) => {
       try {
-        const { name, type, lat, lng, description, radius, remove_image } =
-          req.body;
-        const poiId = parseInt(req.params.id);
+        const { name, description, lat, lng, range_m } = req.body;
 
-        // ✅ FIX: Validate POI data
-        if (!name || !name.trim()) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "POI name không được rỗng" });
-        }
+        if (!name?.trim())
+          return res.status(400).json({ error: "Tên POI không được rỗng" });
+        if (!description?.trim())
+          return res.status(400).json({ error: "Mô tả không được rỗng" });
 
-        if (
-          !type ||
-          !["Chính", "WC", "Bán vé", "Gửi xe", "Bến thuyền"].includes(type)
-        ) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "POI type không hợp lệ" });
-        }
+        const latNum  = parseFloat(lat);
+        const lngNum  = parseFloat(lng);
+        if (isNaN(latNum) || latNum < -90 || latNum > 90)
+          return res.status(400).json({ error: "Vĩ độ không hợp lệ" });
+        if (isNaN(lngNum) || lngNum < -180 || lngNum > 180)
+          return res.status(400).json({ error: "Kinh độ không hợp lệ" });
 
-        const latNum = parseFloat(lat);
-        const lngNum = parseFloat(lng);
+        const rangeNum = range_m ? parseInt(range_m) : 0;
 
-        if (typeof latNum !== "number" || typeof lngNum !== "number") {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Tọa độ phải là số" });
-        }
+        const info = db
+          .prepare(
+            "INSERT INTO pois (name, description, lat, lng, range_m, owner_type, owner_id) VALUES (?, ?, ?, ?, ?, 'business', ?)"
+          )
+          .run(name.trim(), description.trim(), latNum, lngNum, rangeNum, req.business_id);
 
-        if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Tọa độ ngoài phạm vi hợp lệ" });
-        }
+        const poiId = info.lastInsertRowid as number;
 
-        // ✅ PHASE 1 C3: Validate radius
-        const radiusNum = radius ? parseInt(radius) : 0;
-        if (!Number.isInteger(radiusNum) || radiusNum < 0) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res
-            .status(400)
-            .json({ error: "Bán kính phải là số nguyên ≥ 0" });
-        }
-
-        // ✅ PHASE 1 C1: Handle image update/removal
-        const oldPoi = db
-          .prepare("SELECT image FROM pois WHERE id = ?")
-          .get(poiId) as any;
-
-        if (remove_image === "true" && oldPoi?.image) {
-          // User clicked remove image button
-          try {
-            const oldImagePath = path.join(poisDir, oldPoi.image);
-            fs.unlinkSync(oldImagePath);
-            console.log(`[FS.UNLINK] Removed old POI image: ${oldImagePath}`);
-          } catch (e) {
-            console.warn(
-              `[FS.UNLINK] Warning: Could not delete old image file: ${e}`,
-            );
-            // Don't block the update - file may have been manually deleted
-          }
-        } else if (req.file && oldPoi?.image) {
-          // New image uploaded, delete old one
-          try {
-            const oldImagePath = path.join(poisDir, oldPoi.image);
-            fs.unlinkSync(oldImagePath);
-            console.log(`[FS.UNLINK] Replaced old POI image: ${oldImagePath}`);
-          } catch (e) {
-            console.warn(
-              `[FS.UNLINK] Warning: Could not delete old image file: ${e}`,
-            );
-            // Don't block the update
-          }
-        }
-
-        const imageFilename = req.file
-          ? req.file.filename
-          : remove_image === "true"
-            ? null
-            : oldPoi?.image;
-
-        db.prepare(
-          "UPDATE pois SET name = ?, type = ?, lat = ?, lng = ?, description = ?, radius = ?, image = ? WHERE id = ?",
-        ).run(
-          name,
-          type,
-          latNum,
-          lngNum,
-          description || null,
-          radiusNum,
-          imageFilename,
-          poiId,
-        );
-
-        // ✅ v1.4: Fetch updated_at from database
-        const updatedPoi = db
-          .prepare("SELECT updated_at FROM pois WHERE id = ?")
-          .get(poiId) as any;
-
-        res.json({
-          success: true,
-          updated_at: updatedPoi?.updated_at || null,
+        const files = (req.files as Express.Multer.File[]) || [];
+        files.forEach((f, idx) => {
+          db.prepare("INSERT INTO poi_images (poi_id, file_path, sort_order) VALUES (?, ?, ?)").run(
+            poiId, `/uploads/pois/${f.filename}`, idx
+          );
         });
-      } catch (error) {
-        console.error("PUT /api/pois/:id error:", error);
-        // Clean up uploaded file if error
-        if ((req as any).file) {
-          try {
-            fs.unlinkSync((req as any).file.path);
-          } catch (e) {
-            console.warn("Failed to cleanup file after error");
-          }
-        }
-        res.status(500).json({ error: "Lỗi cập nhật POI" });
+
+        // Gọi TTS sinh audio không chặn (Async)
+        generateAudio(poiId, description.trim());
+
+        const created = db.prepare("SELECT * FROM pois WHERE id=?").get(poiId) as any;
+        const images  = db.prepare("SELECT * FROM poi_images WHERE poi_id=?").all(poiId) as any[];
+        res.status(201).json({ ...created, images, audio_files: [], translations: [] });
+      } catch (e) {
+        console.error("POST /api/business/pois:", e);
+        res.status(500).json({ error: "Lỗi tạo POI" });
       }
-    },
+    }
   );
 
-  app.delete("/api/pois/:id", authMiddleware, (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      if (!id) {
-        return res.status(400).json({ error: "POI ID không hợp lệ" });
-      }
+  app.put(
+    "/api/business/pois/:id",
+    businessAuth,
+    upload.array("new_images", 5),
+    async (req: any, res) => {
+      try {
+        const poiId = parseInt(req.params.id);
+        const poi = db
+          .prepare("SELECT * FROM pois WHERE id=? AND owner_type='business' AND owner_id=?")
+          .get(poiId, req.business_id) as any;
+        if (!poi) return res.status(403).json({ error: "Không có quyền sửa POI này" });
 
-      // ✅ PHASE 1 C1: Get POI record to unlink image file before deleting
-      const poi = db
-        .prepare("SELECT image FROM pois WHERE id = ?")
-        .get(id) as any;
+        const { name, description, lat, lng, range_m, delete_image_ids } = req.body;
 
-      if (poi?.image) {
-        try {
-          const imagePath = path.join(poisDir, poi.image);
-          fs.unlinkSync(imagePath);
-          console.log(`[FS.UNLINK] Deleted POI image: ${imagePath}`);
-        } catch (e) {
-          console.warn(
-            `[FS.UNLINK] Warning: Could not delete POI image file: ${e}. Will proceed with DB deletion.`,
-          );
-          // Don't block deletion - file may have been manually deleted
+        db.prepare(
+          "UPDATE pois SET name=?, description=?, lat=?, lng=?, range_m=?, updated_at=CURRENT_TIMESTAMP WHERE id=?"
+        ).run(
+          name?.trim() || poi.name,
+          description?.trim() || poi.description,
+          lat !== undefined ? parseFloat(lat) : poi.lat,
+          lng !== undefined ? parseFloat(lng) : poi.lng,
+          range_m !== undefined ? parseInt(range_m) : poi.range_m,
+          poiId
+        );
+
+        if (delete_image_ids) {
+          const ids: number[] = Array.isArray(delete_image_ids)
+            ? delete_image_ids.map(Number)
+            : [Number(delete_image_ids)];
+          for (const imgId of ids) {
+            const img = db.prepare("SELECT file_path FROM poi_images WHERE id=? AND poi_id=?").get(imgId, poiId) as any;
+            if (img) {
+              deleteFile(img.file_path);
+              db.prepare("DELETE FROM poi_images WHERE id=?").run(imgId);
+            }
+          }
         }
-      }
 
-      // ✅ v1.4: Use tour_pois table to check if POI is used in tours
-      // Prevent deletion if POI is in any tour
-      const tourWithPoi = db
-        .prepare(
-          "SELECT DISTINCT t.id, t.title FROM tour_pois tp JOIN tours t ON tp.tour_id = t.id WHERE tp.poi_id = ?",
-        )
-        .all(id) as Array<{ id: number; title: string }>;
-
-      if (tourWithPoi.length > 0) {
-        return res.status(409).json({
-          error: `POI đang được dùng trong ${tourWithPoi.length} tour: ${tourWithPoi.map((t: any) => t.title).join(", ")}`,
+        const files = (req.files as Express.Multer.File[]) || [];
+        const currentCount = (db.prepare("SELECT COUNT(*) as c FROM poi_images WHERE poi_id=?").get(poiId) as any).c;
+        files.slice(0, 5 - currentCount).forEach((f, idx) => {
+          db.prepare("INSERT INTO poi_images (poi_id, file_path, sort_order) VALUES (?, ?, ?)").run(
+            poiId, `/uploads/pois/${f.filename}`, currentCount + idx
+          );
         });
-      }
 
-      // Delete the POI
-      db.prepare("DELETE FROM pois WHERE id = ?").run(id);
+        res.json({ success: true });
+      } catch (e) {
+        console.error("PUT /api/business/pois/:id:", e);
+        res.status(500).json({ error: "Lỗi cập nhật POI" });
+      }
+    }
+  );
+
+  app.delete("/api/business/pois/:id", businessAuth, (req: any, res) => {
+    try {
+      const poiId = parseInt(req.params.id);
+      const poi = db
+        .prepare("SELECT * FROM pois WHERE id=? AND owner_type='business' AND owner_id=?")
+        .get(poiId, req.business_id) as any;
+      if (!poi) return res.status(403).json({ error: "Không có quyền xóa POI này" });
+
+      const tours = db
+        .prepare(
+          `SELECT t.id, t.name FROM tour_pois tp
+           JOIN tours t ON t.id = tp.tour_id WHERE tp.poi_id = ?`
+        )
+        .all(poiId) as any[];
+      if (tours.length > 0)
+        return res.status(409).json({
+          error: "Không thể xóa POI đang nằm trong Tour",
+          tours,
+        });
+
+      const images = db.prepare("SELECT file_path FROM poi_images WHERE poi_id=?").all(poiId) as any[];
+      images.forEach((img) => deleteFile(img.file_path));
+
+      db.prepare("DELETE FROM pois WHERE id=?").run(poiId);
       res.json({ success: true });
-    } catch (error) {
-      console.error("DELETE /api/pois/:id error:", error);
+    } catch (e) {
+      console.error("DELETE /api/business/pois/:id:", e);
       res.status(500).json({ error: "Lỗi xóa POI" });
     }
   });
 
-  // Tours
-  // ✅ PHASE 2 C14: GET /api/tours with LEFT JOIN to get POI details from tour_pois
-  app.get("/api/tours", authMiddleware, (req, res) => {
-    try {
-      const tours = db.prepare("SELECT * FROM tours").all() as Array<any>;
-
-      const formattedTours = tours.map((t: any) => {
-        // ✅ v1.4: LEFT JOIN to fetch POI details ordered by position
-        const poisData = db
-          .prepare(
-            `SELECT 
-              tp.poi_id,
-              tp.position,
-              p.name,
-              p.type,
-              p.lat,
-              p.lng,
-              p.description,
-              p.radius
-            FROM tour_pois tp
-            LEFT JOIN pois p ON tp.poi_id = p.id
-            WHERE tp.tour_id = ?
-            ORDER BY tp.position ASC`,
-          )
-          .all(t.id) as Array<any>;
-
-        // ✅ v1.4: Build both pois array (detailed) and poi_ids array (just IDs) for frontend compatibility
-        const pois = poisData.map((p: any) => ({
-          poi_id: p.poi_id,
-          position: p.position,
-          name: p.name || "Unknown",
-          type: p.type || "Unknown",
-          lat: p.lat,
-          lng: p.lng,
-          description: p.description || null,
-          radius: p.radius || 0,
-        }));
-
-        const poi_ids = pois.map((p: any) => p.poi_id);
-
-        return {
-          id: t.id,
-          title: t.title,
-          description: t.description || null,
-          image: t.image || null,
-          image_url: t.image
-            ? `http://localhost:3000/uploads/tours/${t.image}`
-            : null,
-          created_at: t.created_at || null,
-          updated_at: t.updated_at || null,
-          poi_ids: poi_ids,
-          pois: pois,
-        };
-      });
-      res.json(formattedTours);
-    } catch (error) {
-      console.error("GET /api/tours error:", error);
-      res.status(500).json({ error: "Lỗi tải Tour" });
-    }
+  // ─── SPA fallback ──────────────────────────────────────────────────────────
+  app.use(express.static(path.join(__dirname, "dist")));
+  app.get("*", (_req, res) => {
+    res.sendFile(path.join(__dirname, "dist", "index.html"));
   });
 
-  app.post("/api/tours", authMiddleware, upload.single("image"), (req, res) => {
-    try {
-      const { title, description, poi_ids: poi_ids_str } = req.body;
-
-      let poi_ids: number[] = [];
-      try {
-        poi_ids = JSON.parse(poi_ids_str || "[]");
-      } catch {
-        if (req.file) fs.unlinkSync(req.file.path);
-        return res.status(400).json({ error: "Invalid poi_ids format" });
-      }
-
-      // ✅ FIX: Validate input trước khi insert
-      if (!title || !title.trim()) {
-        if (req.file) fs.unlinkSync(req.file.path);
-        return res.status(400).json({ error: "Tour title không được rỗng" });
-      }
-
-      if (!Array.isArray(poi_ids) || poi_ids.length === 0) {
-        if (req.file) fs.unlinkSync(req.file.path);
-        return res.status(400).json({ error: "Tour phải chứa ít nhất 1 POI" });
-      }
-
-      // ✅ FIX #4: Validate all POI IDs exist in database (NFR-VAL-05)
-      const allPois = db.prepare("SELECT id FROM pois").all() as Array<{
-        id: number;
-      }>;
-      const validPoiIds = new Set(allPois.map((p: any) => p.id));
-      const invalidIds = poi_ids.filter((id: number) => !validPoiIds.has(id));
-      if (invalidIds.length > 0) {
-        if (req.file) fs.unlinkSync(req.file.path);
-        return res.status(400).json({
-          error: `POI IDs không tồn tại: ${invalidIds.join(", ")}`,
-        });
-      }
-
-      // ✅ PHASE 1 C6: Store only filename
-      const imageFilename = req.file ? req.file.filename : null;
-
-      // ✅ v1.4: Use SQLite Transaction for data integrity
-      // Insert into tours table WITHOUT poi_ids column
-      const insertTourStmt = db.prepare(
-        "INSERT INTO tours (title, description, image, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-      );
-
-      const insertTourPoisStmt = db.prepare(
-        "INSERT INTO tour_pois (tour_id, poi_id, position) VALUES (?, ?, ?)",
-      );
-
-      // ⚠️ Start transaction
-      const transaction = db.transaction(() => {
-        const tourInfo = insertTourStmt.run(
-          title,
-          description || null,
-          imageFilename,
-        );
-
-        const tour_id = tourInfo.lastInsertRowid as number;
-
-        // ✅ v1.4: Insert into tour_pois with position = order in array
-        poi_ids.forEach((poi_id: number, index: number) => {
-          insertTourPoisStmt.run(tour_id, poi_id, index + 1);
-        });
-
-        return tour_id;
-      });
-
-      const tourId = transaction();
-
-      // ✅ v1.4: Fetch created_at, updated_at from database (SQLite auto-assigned)
-      const createdTour = db
-        .prepare("SELECT created_at, updated_at FROM tours WHERE id = ?")
-        .get(tourId) as any;
-
-      // ✅ v1.4: Fetch poi_ids from tour_pois table to return in response
-      const tourPois = db
-        .prepare(
-          "SELECT poi_id FROM tour_pois WHERE tour_id = ? ORDER BY position ASC",
-        )
-        .all(tourId) as Array<{ poi_id: number }>;
-
-      res.status(201).json({
-        id: tourId,
-        created_at: createdTour?.created_at || null,
-        updated_at: createdTour?.updated_at || null,
-        poi_ids: tourPois.map((tp) => tp.poi_id),
-      });
-    } catch (error) {
-      console.error("POST /api/tours error:", error);
-      if ((req as any).file) {
-        try {
-          fs.unlinkSync((req as any).file.path);
-        } catch (e) {
-          console.warn("Failed to cleanup file after error");
-        }
-      }
-      res.status(500).json({ error: "Lỗi tạo tour" });
-    }
-  });
-
-  app.put(
-    "/api/tours/:id",
-    authMiddleware,
-    upload.single("image"),
-    (req, res) => {
-      try {
-        const {
-          title,
-          description,
-          poi_ids: poi_ids_str,
-          remove_image,
-        } = req.body;
-        const tourId = parseInt(req.params.id);
-
-        let poi_ids: number[] = [];
-        try {
-          poi_ids = JSON.parse(poi_ids_str || "[]");
-        } catch {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Invalid poi_ids format" });
-        }
-
-        // ✅ FIX: Validate input
-        if (!title || !title.trim()) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({ error: "Tour title không được rỗng" });
-        }
-
-        if (!Array.isArray(poi_ids) || poi_ids.length === 0) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res
-            .status(400)
-            .json({ error: "Tour phải chứa ít nhất 1 POI" });
-        }
-
-        // ✅ FIX #4: Validate all POI IDs exist in database (NFR-VAL-05)
-        const allPois = db.prepare("SELECT id FROM pois").all() as Array<{
-          id: number;
-        }>;
-        const validPoiIds = new Set(allPois.map((p: any) => p.id));
-        const invalidIds = poi_ids.filter((id: number) => !validPoiIds.has(id));
-        if (invalidIds.length > 0) {
-          if (req.file) fs.unlinkSync(req.file.path);
-          return res.status(400).json({
-            error: `POI IDs không tồn tại: ${invalidIds.join(", ")}`,
-          });
-        }
-
-        // ✅ PHASE 1 C6: Handle image update/removal for tours
-        const oldTour = db
-          .prepare("SELECT image FROM tours WHERE id = ?")
-          .get(tourId) as any;
-
-        if (remove_image === "true" && oldTour?.image) {
-          // User clicked remove image button
-          try {
-            const oldImagePath = path.join(toursDir, oldTour.image);
-            fs.unlinkSync(oldImagePath);
-            console.log(`[FS.UNLINK] Removed tour image: ${oldImagePath}`);
-          } catch (e) {
-            console.warn(
-              `[FS.UNLINK] Warning: Could not delete tour image: ${e}`,
-            );
-          }
-        } else if (req.file && oldTour?.image) {
-          // New image uploaded, delete old one
-          try {
-            const oldImagePath = path.join(toursDir, oldTour.image);
-            fs.unlinkSync(oldImagePath);
-            console.log(`[FS.UNLINK] Replaced tour image: ${oldImagePath}`);
-          } catch (e) {
-            console.warn(
-              `[FS.UNLINK] Warning: Could not delete old tour image: ${e}`,
-            );
-          }
-        }
-
-        const imageFilename = req.file
-          ? req.file.filename
-          : remove_image === "true"
-            ? null
-            : oldTour?.image;
-
-        // ✅ v1.4: Use SQLite Transaction for data integrity
-        const updateTourStmt = db.prepare(
-          "UPDATE tours SET title = ?, description = ?, image = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        );
-
-        const deleteTourPoisStmt = db.prepare(
-          "DELETE FROM tour_pois WHERE tour_id = ?",
-        );
-
-        const insertTourPoisStmt = db.prepare(
-          "INSERT INTO tour_pois (tour_id, poi_id, position) VALUES (?, ?, ?)",
-        );
-
-        // ⚠️ Start transaction
-        const transaction = db.transaction(() => {
-          // ✅ v1.4: Update tours WITHOUT poi_ids column
-          updateTourStmt.run(title, description || null, imageFilename, tourId);
-
-          // ✅ v1.4: Delete old tour_pois records
-          deleteTourPoisStmt.run(tourId);
-
-          // ✅ v1.4: Insert new tour_pois with updated positions
-          poi_ids.forEach((poi_id: number, index: number) => {
-            insertTourPoisStmt.run(tourId, poi_id, index + 1);
-          });
-        });
-
-        transaction();
-
-        // ✅ v1.4: Fetch updated_at from database (SQLite auto-updated)
-        const updatedTour = db
-          .prepare("SELECT updated_at FROM tours WHERE id = ?")
-          .get(tourId) as any;
-
-        // ✅ v1.4: Fetch poi_ids from tour_pois table to return in response
-        const tourPois = db
-          .prepare(
-            "SELECT poi_id FROM tour_pois WHERE tour_id = ? ORDER BY position ASC",
-          )
-          .all(tourId) as Array<{ poi_id: number }>;
-
-        res.json({
-          success: true,
-          updated_at: updatedTour?.updated_at || null,
-          poi_ids: tourPois.map((tp) => tp.poi_id),
-        });
-      } catch (error) {
-        console.error("PUT /api/tours/:id error:", error);
-        if ((req as any).file) {
-          try {
-            fs.unlinkSync((req as any).file.path);
-          } catch (e) {
-            console.warn("Failed to cleanup file after error");
-          }
-        }
-        res.status(500).json({ error: "Lỗi cập nhật tour" });
-      }
-    },
-  );
-
-  app.delete("/api/tours/:id", authMiddleware, (req, res) => {
-    try {
-      const tourId = parseInt(req.params.id);
-      if (!tourId) {
-        return res.status(400).json({ error: "Tour ID không hợp lệ" });
-      }
-
-      // ✅ PHASE 1 C6: Get tour record to unlink image file before deleting
-      const tour = db
-        .prepare("SELECT image FROM tours WHERE id = ?")
-        .get(tourId) as any;
-
-      if (tour?.image) {
-        try {
-          const imagePath = path.join(toursDir, tour.image);
-          fs.unlinkSync(imagePath);
-          console.log(`[FS.UNLINK] Deleted tour image: ${imagePath}`);
-        } catch (e) {
-          console.warn(
-            `[FS.UNLINK] Warning: Could not delete tour image file: ${e}. Will proceed with DB deletion.`,
-          );
-        }
-      }
-
-      db.prepare("DELETE FROM tours WHERE id = ?").run(tourId);
-      res.json({ success: true });
-    } catch (error) {
-      console.error("DELETE /api/tours/:id error:", error);
-      res.status(500).json({ error: "Lỗi xóa tour" });
-    }
-  });
-
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-      plugins: [],
-      define: {
-        "process.env.GEMINI_API_KEY": JSON.stringify(
-          process.env.GEMINI_API_KEY || "",
-        ),
-      },
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.join(__dirname, "dist")));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  app.listen(PORT, () => {
+    console.log(`[SERVER] Running on http://localhost:${PORT}`);
   });
 }
 
-startServer();
+startServer().catch(console.error);

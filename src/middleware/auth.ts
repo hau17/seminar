@@ -1,74 +1,85 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-// ✅ Extend Express Request to include decoded token data
+const JWT_SECRET =
+  process.env.JWT_SECRET || "dev-secret-key-change-in-production";
+
+// ─── Extend Express Request ────────────────────────────────────────────────────
 declare global {
   namespace Express {
     interface Request {
-      businessId?: number;
-      businessEmail?: string;
+      admin_id?: number;
+      admin_email?: string;
+      business_id?: number;
+      business_email?: string;
     }
   }
 }
 
-// ✅ v1.7: Use same JWT_SECRET as server.ts to ensure token compatibility
-const JWT_SECRET =
-  process.env.JWT_SECRET || "dev-secret-key-change-in-production";
-
-/**
- * Middleware: Verify Business Token (JWT)
- * ✅ v1.7: Protects /api/businesses/* routes
- * Checks Authorization header for "Bearer <token>"
- * Decodes token and attaches businessId to request
- */
-export const verifyBusinessToken = (
+// ─── Admin token middleware ────────────────────────────────────────────────────
+export const verifyAdminToken = (
   req: Request,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ) => {
   const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer "))
+    return res.status(401).json({ error: "Missing or invalid Authorization header" });
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res
-      .status(401)
-      .json({ error: "Missing or invalid Authorization header" });
-  }
-
-  const token = authHeader.slice(7); // Remove "Bearer "
-
+  const token = authHeader.slice(7);
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as {
-      business_id: number;
+      admin_id: number;
       email: string;
-      iat: number;
-      exp: number;
+      role: string;
     };
-
-    // ✅ Support both business_id (from inline) and businessId (from new system)
-    req.businessId = decoded.business_id || decoded.businessId;
-    req.businessEmail = decoded.email;
+    if (decoded.role !== "admin")
+      return res.status(403).json({ error: "Admin access required" });
+    req.admin_id = decoded.admin_id;
+    req.admin_email = decoded.email;
     next();
-  } catch (error) {
+  } catch {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 };
 
-/**
- * Generate Business JWT Token
- * ✅ v1.7: Called during register/login
- * Token expires in 7 days
- * Uses old format (business_id) for backward compatibility
- */
+// ─── Business token middleware ─────────────────────────────────────────────────
+export const verifyBusinessToken = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer "))
+    return res.status(401).json({ error: "Missing or invalid Authorization header" });
+
+  const token = authHeader.slice(7);
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as {
+      business_id: number;
+      email: string;
+      role: string;
+    };
+    if (decoded.role !== "business")
+      return res.status(403).json({ error: "Business access required" });
+    req.business_id = decoded.business_id;
+    req.business_email = decoded.email;
+    next();
+  } catch {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+};
+
+// ─── Token generators ─────────────────────────────────────────────────────────
+export const generateAdminToken = (adminId: number, email: string): string =>
+  jwt.sign({ admin_id: adminId, email, role: "admin" }, JWT_SECRET, {
+    expiresIn: "24h",
+  });
+
 export const generateBusinessToken = (
   businessId: number,
-  email: string,
-): string => {
-  return jwt.sign(
-    {
-      business_id: businessId,
-      email,
-    },
-    JWT_SECRET,
-    { expiresIn: "24h" },
-  );
-};
+  email: string
+): string =>
+  jwt.sign({ business_id: businessId, email, role: "business" }, JWT_SECRET, {
+    expiresIn: "24h",
+  });

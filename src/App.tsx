@@ -1,4 +1,4 @@
-﻿//  v1.5 Root App with Routing
+//  v1.6 Root App with Routing
 import {
   BrowserRouter as Router,
   Routes,
@@ -16,11 +16,23 @@ export default function App() {
       <Routes>
         {/* Admin Routes */}
         <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin/login" element={<AdminDashboard />} />
+        <Route path="/admin/dashboard" element={<AdminDashboard />} />
 
-        {/* Business Routes */}
+        {/* Business Routes — PRD §6.1, §6.2 */}
         <Route path="/business/auth" element={<BusinessAuth />} />
+        <Route path="/business/login" element={<BusinessAuth />} />
+        <Route path="/business/register" element={<BusinessAuth />} />
         <Route
           path="/business/dashboard"
+          element={
+            <BusinessAuthGuard>
+              <BusinessDashboard />
+            </BusinessAuthGuard>
+          }
+        />
+        <Route
+          path="/business/pois"
           element={
             <BusinessAuthGuard>
               <BusinessDashboard />
@@ -37,3 +49,4 @@ export default function App() {
     </Router>
   );
 }
+

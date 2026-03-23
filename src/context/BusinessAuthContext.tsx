@@ -1,97 +1,56 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { BusinessUser } from "../types";
 
 interface BusinessAuth {
-  businessId: number;
-  businessToken: string;
-  companyName: string;
-  email: string;
+  business: BusinessUser;
+  token: string;
 }
 
 interface BusinessAuthContextType {
   auth: BusinessAuth | null;
   isLoading: boolean;
-  register: (
-    companyName: string,
-    email: string,
-    password: string,
-    phone?: string,
-  ) => Promise<void>;
+  register: (name: string, email: string, password: string, confirmPassword?: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   error: string | null;
   clearError: () => void;
 }
 
-const BusinessAuthContext = createContext<BusinessAuthContextType | undefined>(
-  undefined,
-);
+const BusinessAuthContext = createContext<BusinessAuthContextType | undefined>(undefined);
 
-export const BusinessAuthProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+export const BusinessAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [auth, setAuth] = useState<BusinessAuth | null>(null);
-  // ✅ CRITICAL FIX: Start with isLoading=true to prevent guard from redirecting
-  // while localStorage is being checked. Set to false once check completes.
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ Load token from localStorage on mount (restore session)
   useEffect(() => {
     try {
-      const savedAuth = localStorage.getItem("business_auth");
-      if (savedAuth) {
-        setAuth(JSON.parse(savedAuth));
-      }
-    } catch (e) {
-      console.warn("Failed to restore auth session");
+      const saved = localStorage.getItem("business_auth");
+      if (saved) setAuth(JSON.parse(saved));
+    } catch {
       localStorage.removeItem("business_auth");
     } finally {
-      // ✅ Always set isLoading=false after localStorage check (success or fail)
       setIsLoading(false);
     }
   }, []);
 
-  const register = async (
-    companyName: string,
-    email: string,
-    password: string,
-    phone?: string,
-  ) => {
+  const register = async (name: string, email: string, password: string, confirmPassword?: string) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/businesses/register", {
+      const res = await fetch("/api/auth/business/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          company_name: companyName,
-          email,
-          password,
-          phone: phone || null,
-        }),
+        body: JSON.stringify({ name, email, password, confirm_password: confirmPassword }),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          errorData.error || `Registration failed (${response.status})`,
-        );
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Đăng ký thất bại");
       }
-
-      const data = await response.json();
-      const authData: BusinessAuth = {
-        businessId: data.business_id,
-        businessToken: data.business_token || data.token,
-        companyName: data.company_name,
-        email: data.email,
-      };
-
-      setAuth(authData);
-      localStorage.setItem("business_auth", JSON.stringify(authData));
+      // Register does NOT auto-login per PRD BR-20
     } catch (err) {
-      const errorMsg =
-        err instanceof Error ? err.message : "Registration failed";
-      setError(errorMsg);
+      const msg = err instanceof Error ? err.message : "Đăng ký thất bại";
+      setError(msg);
       throw err;
     } finally {
       setIsLoading(false);
@@ -102,30 +61,22 @@ export const BusinessAuthProvider: React.FC<{ children: React.ReactNode }> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/businesses/login", {
+      const res = await fetch("/api/auth/business/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Login failed (${response.status})`);
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Đăng nhập thất bại");
       }
-
-      const data = await response.json();
-      const authData: BusinessAuth = {
-        businessId: data.business_id,
-        businessToken: data.business_token || data.token,
-        companyName: data.company_name,
-        email: data.email,
-      };
-
+      const { token, business } = await res.json();
+      const authData: BusinessAuth = { business, token };
       setAuth(authData);
       localStorage.setItem("business_auth", JSON.stringify(authData));
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Login failed";
-      setError(errorMsg);
+      const msg = err instanceof Error ? err.message : "Đăng nhập thất bại";
+      setError(msg);
       throw err;
     } finally {
       setIsLoading(false);
@@ -141,26 +92,14 @@ export const BusinessAuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const clearError = () => setError(null);
 
   return (
-    <BusinessAuthContext.Provider
-      value={{
-        auth,
-        isLoading,
-        register,
-        login,
-        logout,
-        error,
-        clearError,
-      }}
-    >
+    <BusinessAuthContext.Provider value={{ auth, isLoading, register, login, logout, error, clearError }}>
       {children}
     </BusinessAuthContext.Provider>
   );
 };
 
 export const useBusinessAuth = () => {
-  const context = useContext(BusinessAuthContext);
-  if (!context) {
-    throw new Error("useBusinessAuth must be used within BusinessAuthProvider");
-  }
-  return context;
+  const ctx = useContext(BusinessAuthContext);
+  if (!ctx) throw new Error("useBusinessAuth must be used within BusinessAuthProvider");
+  return ctx;
 };

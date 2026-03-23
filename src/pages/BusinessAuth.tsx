@@ -19,7 +19,6 @@ export function BusinessAuth() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [companyName, setCompanyName] = useState("");
-  const [phone, setPhone] = useState("");
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -36,7 +35,7 @@ export function BusinessAuth() {
       if (isLoginMode) {
         await login(email, password);
       } else {
-        await register(companyName, email, password, phone);
+        await register(companyName, email, password);
       }
       // Navigation will happen via useEffect when auth changes
     } catch (err) {
@@ -76,18 +75,7 @@ export function BusinessAuth() {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Số Điện Thoại
-                </label>
-                <input
-                  type="tel"
-                  placeholder="+84 xxx xxx xxx"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+
             </>
           )}
 
@@ -107,7 +95,7 @@ export function BusinessAuth() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Mật Khẩu {!isLoginMode && "(tối thiểu 6 ký tự)"}
+              Mật Khẩu {!isLoginMode && "(tối thiểu 8 ký tự)"}
             </label>
             <input
               type="password"
@@ -115,7 +103,7 @@ export function BusinessAuth() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={isLoginMode ? 0 : 6}
+              minLength={isLoginMode ? 0 : 8}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -144,7 +132,6 @@ export function BusinessAuth() {
                 setEmail("");
                 setPassword("");
                 setCompanyName("");
-                setPhone("");
               }}
               className="text-blue-600 hover:text-blue-700 font-semibold"
             >

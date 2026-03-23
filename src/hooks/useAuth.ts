@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
+import { AdminUser } from "../types";
 
 interface AuthState {
   isLoggedIn: boolean;
   token: string | null;
+  admin: AdminUser | null;
   error: string | null;
   loading: boolean;
 }
@@ -10,23 +12,25 @@ interface AuthState {
 export const useAuth = () => {
   const [auth, setAuth] = useState<AuthState>({
     isLoggedIn: false,
-    token: localStorage.getItem("authToken"),
+    token: null,
+    admin: null,
     error: null,
     loading: false,
   });
 
   useEffect(() => {
-    // Check if token exists on mount
-    const token = localStorage.getItem("authToken");
+    const token = localStorage.getItem("adminToken");
+    const adminRaw = localStorage.getItem("adminUser");
     if (token) {
-      setAuth((prev) => ({ ...prev, isLoggedIn: true, token }));
+      const admin = adminRaw ? (JSON.parse(adminRaw) as AdminUser) : null;
+      setAuth((prev) => ({ ...prev, isLoggedIn: true, token, admin }));
     }
   }, []);
 
   const login = async (email: string, password: string) => {
     setAuth((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch("/api/auth/admin/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -37,9 +41,10 @@ export const useAuth = () => {
         throw new Error(error || "Sai email hoặc mật khẩu");
       }
 
-      const { token } = await res.json();
-      localStorage.setItem("authToken", token);
-      setAuth({ isLoggedIn: true, token, error: null, loading: false });
+      const { token, admin } = await res.json();
+      localStorage.setItem("adminToken", token);
+      localStorage.setItem("adminUser", JSON.stringify(admin));
+      setAuth({ isLoggedIn: true, token, admin, error: null, loading: false });
     } catch (err) {
       setAuth((prev) => ({
         ...prev,
@@ -50,8 +55,9 @@ export const useAuth = () => {
   };
 
   const logout = () => {
-    localStorage.removeItem("authToken");
-    setAuth({ isLoggedIn: false, token: null, error: null, loading: false });
+    localStorage.removeItem("adminToken");
+    localStorage.removeItem("adminUser");
+    setAuth({ isLoggedIn: false, token: null, admin: null, error: null, loading: false });
   };
 
   return { ...auth, login, logout };

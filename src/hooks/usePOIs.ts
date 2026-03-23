@@ -5,111 +5,132 @@ export const usePOIs = (token: string | null) => {
   const [pois, setPois] = useState<POI[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchPois = useCallback(async () => {
-    setLoading(true);
-    try {
-      const headers: HeadersInit = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
+  const authHeaders = (): HeadersInit =>
+    token ? { Authorization: `Bearer ${token}` } : {};
 
-      const res = await fetch("/api/pois", { headers });
-      if (res.status === 401) {
-        localStorage.removeItem("authToken");
-        window.location.href = "/"; // Redirect to login
-        throw new Error("Session hết hạn");
+  const fetchPois = useCallback(
+    async (search?: string) => {
+      setLoading(true);
+      try {
+        const url = search
+          ? `/api/admin/pois?search=${encodeURIComponent(search)}`
+          : "/api/admin/pois";
+        const res = await fetch(url, { headers: authHeaders() });
+        if (res.status === 401) {
+          localStorage.removeItem("adminToken");
+          window.location.href = "/";
+          throw new Error("Session hết hạn");
+        }
+        if (!res.ok) throw new Error("Lỗi tải POIs");
+        const data = await res.json();
+        setPois(data);
+      } catch (err) {
+        console.error(err);
+        throw err;
+      } finally {
+        setLoading(false);
       }
+    },
+    [token] // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
-      if (!res.ok) throw new Error("Lỗi tải POIs");
-
-      // if (!res.ok) throw new Error("Lỗi tải POIs");
-      const data = await res.json();
-      setPois(data);
-    } catch (error) {
-      console.error(error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
-
+  /**
+   * savePoi — create or update a POI.
+   * @param poi  Partial POI (id present → PUT, absent → POST)
+   * @param newImageFiles  New image files to upload (≤5 total)
+   * @param deleteImageIds IDs of poi_images to delete on PUT
+   */
   const savePoi = useCallback(
     async (
       poi: Partial<POI>,
-      imageFile?: File | null,
-      removeImage?: boolean,
+      newImageFiles?: File[],
+      deleteImageIds?: number[]
     ) => {
-      const method = poi.id ? "PUT" : "POST";
-      const url = poi.id ? `/api/pois/${poi.id}` : "/api/pois";
+      const isEdit = !!poi.id;
+      const method = isEdit ? "PUT" : "POST";
+      const url = isEdit ? `/api/admin/pois/${poi.id}` : "/api/admin/pois";
 
-      // ✅ PHASE 1 C1, C3: Use FormData for multipart/form-data
       const formData = new FormData();
       formData.append("name", poi.name || "");
-      formData.append("type", poi.type || "");
-      formData.append("lat", (poi.lat || 0).toString());
-      formData.append("lng", (poi.lng || 0).toString());
       formData.append("description", poi.description || "");
-      formData.append("radius", (poi.radius || 0).toString());
+      formData.append("lat", (poi.lat ?? 0).toString());
+      formData.append("lng", (poi.lng ?? 0).toString());
+      formData.append("range_m", (poi.range_m ?? 0).toString());
 
-      if (imageFile) {
-        formData.append("image", imageFile);
-      }
-      if (removeImage) {
-        formData.append("remove_image", "true");
+      if (isEdit && deleteImageIds?.length) {
+        deleteImageIds.forEach((id) =>
+          formData.append("delete_image_ids", String(id))
+        );
       }
 
-      const headers: HeadersInit = {};
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      // ✅ IMPORTANT: Do NOT set Content-Type - browser will set it with boundary
+      const imageField = isEdit ? "new_images" : "images";
+      (newImageFiles || []).forEach((f) => formData.append(imageField, f));
 
       const res = await fetch(url, {
         method,
-        headers,
+        headers: authHeaders(),
         body: formData,
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || "Lỗi lưu POI");
+        const err = await res.json();
+        throw new Error(err.error || "Lỗi lưu POI");
       }
 
-      // ✅ FIX: Refresh POI list, nhưng không throw error nếu fetchPois fail
       try {
         await fetchPois();
-      } catch (error) {
-        console.warn(
-          "Cảnh báo: Không thể tải lại danh sách POI, vui lòng refresh",
-          error,
-        );
+      } catch (e) {
+        console.warn("Không thể reload danh sách POI:", e);
       }
     },
-    [token, fetchPois],
+    [token, fetchPois] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const deletePoi = useCallback(
-    async (id: number) => {
-      const headers: HeadersInit = {};
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      const res = await fetch(`/api/pois/${id}`, {
+    async (id: number): Promise<{ tours?: { id: number; name: string }[] }> => {
+      const res = await fetch(`/api/admin/pois/${id}`, {
         method: "DELETE",
-        headers,
+        headers: authHeaders(),
       });
 
-      if (!res.ok) throw new Error("Lỗi xóa POI");
+      const data = await res.json();
 
-      // ✅ FIX: Refresh POI list, nhưng không throw error nếu fetchPois fail
-      // DELETE đã thành công, không nên block delete dù fetch fail
+      if (res.status === 409) {
+        // POI is in a tour — return tour list so caller can show message
+        return { tours: data.tours };
+      }
+      if (!res.ok) throw new Error(data.error || "Lỗi xóa POI");
+
       try {
         await fetchPois();
-      } catch (error) {
-        console.warn(
-          "Cảnh báo: Không thể tải lại danh sách POI, vui lòng refresh",
-          error,
-        );
-        // Không throw error - DELETE đã thành công, POI đã xóa khỏi DB
+      } catch (e) {
+        console.warn("Không thể reload danh sách POI:", e);
       }
+      return {};
     },
-    [token, fetchPois],
+    [token, fetchPois] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  return { pois, setPois, loading, fetchPois, savePoi, deletePoi };
+  const deleteBusinessPoi = useCallback(
+    async (
+      poiId: number
+    ): Promise<{ tours?: { id: number; name: string }[] }> => {
+      const res = await fetch(`/api/admin/pois/business/${poiId}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      if (res.status === 409) return { tours: data.tours };
+      if (!res.ok) throw new Error(data.error || "Lỗi xóa POI doanh nghiệp");
+      try {
+        await fetchPois();
+      } catch (e) {
+        console.warn("Không thể reload danh sách POI:", e);
+      }
+      return {};
+    },
+    [token, fetchPois] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  return { pois, setPois, loading, fetchPois, savePoi, deletePoi, deleteBusinessPoi };
 };

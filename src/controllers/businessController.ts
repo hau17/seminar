@@ -4,156 +4,90 @@ import getDb from "../db";
 import { generateBusinessToken } from "../middleware/auth";
 
 /**
- * ✅ v1.7: Register Business User
- * POST /api/businesses/register
- * Body: { company_name, email, password, phone }
- * Returns: { business_id, business_token, company_name, email }
+ * Register Business User
+ * POST /api/auth/business/register
+ * Body: { name, email, password }
  */
 export const registerBusiness = async (req: Request, res: Response) => {
   try {
-    const { company_name, email, password, phone } = req.body;
+    const { name, email, password, confirm_password } = req.body;
 
-    // ✅ Validation
-    if (!company_name || !email || !password) {
-      return res
-        .status(400)
-        .json({ error: "company_name, email, and password are required" });
-    }
+    if (!name?.trim() || !email?.trim() || !password)
+      return res.status(400).json({ error: "name, email, password là bắt buộc" });
 
-    if (password.length < 6) {
-      return res
-        .status(400)
-        .json({ error: "Password must be at least 6 characters" });
-    }
+    if (password.length < 8)
+      return res.status(400).json({ error: "Mật khẩu phải tối thiểu 8 ký tự" });
+
+    if (confirm_password && confirm_password !== password)
+      return res.status(400).json({ error: "Mật khẩu xác nhận không khớp" });
 
     const db = getDb();
 
-    // ✅ Check if email already exists
-    const existingBusiness = db
-      .prepare("SELECT * FROM businesses WHERE email = ?")
-      .get(email);
+    const existing = db.prepare("SELECT id FROM businesses WHERE email = ?").get(email);
+    if (existing) return res.status(409).json({ error: "Email đã được sử dụng" });
 
-    if (existingBusiness) {
-      return res.status(409).json({ error: "Email already registered" });
-    }
+    const hash = await bcrypt.hash(password, 10);
+    db.prepare("INSERT INTO businesses (name, email, password_hash) VALUES (?, ?, ?)").run(
+      name.trim(), email.trim(), hash
+    );
 
-    // ✅ Hash password
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    // ✅ Insert into database
-    const result = db
-      .prepare(
-        `INSERT INTO businesses (company_name, email, password_hash, phone, created_at, updated_at)
-         VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      )
-      .run(company_name, email, passwordHash, phone || null);
-
-    const businessId = result.lastInsertRowid as number;
-
-    // ✅ Generate token
-    const business_token = generateBusinessToken(businessId, email);
-
-    res.status(201).json({
-      success: true,
-      business_id: businessId,
-      business_token,
-      company_name,
-      email,
-      message: "Registration successful",
-    });
-  } catch (error) {
-    console.error("Register error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(201).json({ message: "Đăng ký thành công" });
+  } catch (err) {
+    console.error("registerBusiness:", err);
+    res.status(500).json({ error: "Lỗi server" });
   }
 };
 
 /**
- * ✅ v1.7: Login Business User
- * POST /api/businesses/login
+ * Login Business User
+ * POST /api/auth/business/login
  * Body: { email, password }
- * Returns: { business_id, business_token, company_name, email }
  */
 export const loginBusiness = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
-
-    // ✅ Validation
-    if (!email || !password) {
-      return res.status(400).json({ error: "email and password are required" });
-    }
+    if (!email || !password)
+      return res.status(400).json({ error: "Email và mật khẩu không được rỗng" });
 
     const db = getDb();
-
-    // ✅ Find business
-    const business = db
-      .prepare(
-        "SELECT id, company_name, email, password_hash FROM businesses WHERE email = ?",
-      )
+    const biz = db
+      .prepare("SELECT id, name, email, password_hash FROM businesses WHERE email = ?")
       .get(email) as any;
 
-    if (!business) {
-      return res.status(401).json({ error: "Invalid email or password" });
-    }
+    if (!biz) return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
 
-    // ✅ Verify password
-    const isPasswordValid = await bcrypt.compare(
-      password,
-      business.password_hash,
-    );
+    const match = await bcrypt.compare(password, biz.password_hash);
+    if (!match) return res.status(401).json({ error: "Email hoặc mật khẩu không đúng" });
 
-    if (!isPasswordValid) {
-      return res.status(401).json({ error: "Invalid email or password" });
-    }
-
-    // ✅ Generate token
-    const business_token = generateBusinessToken(business.id, business.email);
-
-    res.status(200).json({
-      success: true,
-      business_id: business.id,
-      business_token,
-      company_name: business.company_name,
-      email: business.email,
-      message: "Login successful",
+    const token = generateBusinessToken(biz.id, biz.email);
+    res.json({
+      token,
+      business: { id: biz.id, name: biz.name, email: biz.email },
     });
-  } catch (error) {
-    console.error("Login error:", error);
-    res.status(500).json({ error: "Internal server error" });
+  } catch (err) {
+    console.error("loginBusiness:", err);
+    res.status(500).json({ error: "Lỗi server" });
   }
 };
 
 /**
- * ✅ v1.7: Get Business Profile
- * GET /api/businesses/me
- * Requires: Authorization: Bearer business_token
- * Returns: { id, company_name, email, phone, created_at }
+ * Get Business Profile
+ * GET /api/auth/business/me
  */
 export const getBusinessProfile = (req: Request, res: Response) => {
   try {
-    const businessId = req.businessId;
-
-    if (!businessId) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+    const businessId = req.business_id;
+    if (!businessId) return res.status(401).json({ error: "Unauthorized" });
 
     const db = getDb();
-
-    const business = db
-      .prepare(
-        "SELECT id, company_name, email, phone, created_at FROM businesses WHERE id = ?",
-      )
+    const biz = db
+      .prepare("SELECT id, name, email, created_at FROM businesses WHERE id = ?")
       .get(businessId);
 
-    if (!business) {
-      return res.status(404).json({ error: "Business not found" });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: business,
-    });
-  } catch (error) {
-    console.error("Get profile error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    if (!biz) return res.status(404).json({ error: "Doanh nghiệp không tồn tại" });
+    res.json(biz);
+  } catch (err) {
+    console.error("getBusinessProfile:", err);
+    res.status(500).json({ error: "Lỗi server" });
   }
 };

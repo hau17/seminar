@@ -3,10 +3,9 @@ import {
   MapContainer,
   TileLayer,
   Marker,
-  Popup,
   useMapEvents,
   useMap,
-  Polyline,
+  Circle,
 } from "react-leaflet";
 import L from "leaflet";
 import {
@@ -16,31 +15,24 @@ import {
   Plus,
   Trash2,
   Edit2,
-  Save,
   X,
-  ChevronRight,
-  Menu,
-  Info,
-  Map as MapIcon,
+  BarChart2,
   Layers,
+  Building2,
+  Image as ImageIcon,
+  Eye,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { POI, POIType, Tour } from "../types";
+import { POI, Tour, DashboardStats, TourPOI, POIImage, TourImage } from "../types";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { ToastContainer } from "../components/Toast";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import { LoginPage } from "../components/LoginPage";
 import { AdminBusinessesSection } from "./AdminBusinessesSection";
-import { AdminPendingPoisSection } from "./AdminPendingPoisSection";
 import { validatePOI, validateTour } from "../utils/validation";
 import { usePOIs } from "../hooks/usePOIs";
 import { useTours } from "../hooks/useTours";
-import { useNavigate } from "react-router-dom";
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
 
 // Fix Leaflet marker icons
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -52,401 +44,460 @@ const DefaultIcon = L.icon({
   iconSize: [25, 41],
   iconAnchor: [12, 41],
 });
-
 L.Marker.prototype.options.icon = DefaultIcon;
 
-const POI_ICONS: Record<POIType, string> = {
-  [POIType.MAIN]: "📍",
-  [POIType.WC]: "🚻",
-  [POIType.TICKET]: "🎫",
-  [POIType.PARKING]: "🅿️",
-  [POIType.PORT]: "⚓",
-};
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
-// ✅ FIX #9: FR-POI-001 Color-coded Markers by POI type
-const getMarkerIcon = (poiType: POIType, isSelected: boolean) => {
-  // Color scheme: MAIN=Blue, others=Orange, Selected=Green
-  const colorMap: Record<POIType, string> = {
-    [POIType.MAIN]: "#3b82f6", // Blue for main POI
-    [POIType.WC]: "#f97316", // Orange for minor POIs
-    [POIType.TICKET]: "#f97316",
-    [POIType.PARKING]: "#f97316",
-    [POIType.PORT]: "#f97316",
-  };
-
-  const bgColor = isSelected ? "#22c55e" : colorMap[poiType]; // Green when selected
-  const emoji = POI_ICONS[poiType];
-
+// ─── Map marker icons ──────────────────────────────────────────────────────────
+const getMarkerIcon = (isSelected: boolean, tourPosition?: number) => {
+  const bg = isSelected ? "#f59e0b" : "#22c55e";
+  const label = tourPosition !== undefined ? String(tourPosition) : "📍";
   return L.divIcon({
     html: `<div style="
-      background-color: ${bgColor};
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      border: 3px solid white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-      cursor: pointer;
-      transition: all 0.2s ease;
-    ">
-      ${emoji}
-    </div>`,
-    iconSize: [40, 40],
-    iconAnchor: [20, 40],
-    popupAnchor: [0, -40],
+      background-color:${bg};width:36px;height:36px;border-radius:50%;
+      display:flex;align-items:center;justify-content:center;
+      font-size:${tourPosition !== undefined ? "14px" : "18px"};font-weight:700;color:white;
+      border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);cursor:pointer;"
+    >${label}</div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 36],
+    popupAnchor: [0, -36],
     className: "custom-marker",
   });
 };
 
+// ─── Image thumb grid ──────────────────────────────────────────────────────────
+function ImageGrid({ images, size = "sm" }: { images?: POIImage[] | TourImage[]; size?: "sm" | "md" }) {
+  if (!images?.length) return null;
+  const h = size === "sm" ? "h-14" : "h-24";
+  return (
+    <div className="flex flex-wrap gap-1 mt-2">
+      {images.map((img) => (
+        <img
+          key={img.id}
+          src={img.file_path}
+          className={`${h} w-auto rounded object-cover border border-slate-200`}
+          alt=""
+          onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Multi-image uploader ──────────────────────────────────────────────────────
+interface MultiImageUploaderProps {
+  existingImages?: (POIImage | TourImage)[];
+  pendingFiles: File[];
+  onAddFiles: (files: File[]) => void;
+  onDeleteExisting: (id: number) => void;
+  onRemovePending: (index: number) => void;
+  maxTotal?: number;
+}
+function MultiImageUploader({
+  existingImages = [],
+  pendingFiles,
+  onAddFiles,
+  onDeleteExisting,
+  onRemovePending,
+  maxTotal = 5,
+}: MultiImageUploaderProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const totalCount = existingImages.length + pendingFiles.length;
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const allowed = maxTotal - totalCount;
+    if (allowed <= 0) return;
+    const valid = files.filter((f) => {
+      if (f.size > 5 * 1024 * 1024) return false;
+      return ["image/jpeg", "image/png", "image/webp"].includes(f.type);
+    });
+    onAddFiles(valid.slice(0, allowed));
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        {existingImages.map((img) => (
+          <div key={img.id} className="relative group">
+            <img
+              src={img.file_path}
+              className="h-16 w-16 object-cover rounded-lg border border-slate-200"
+              alt=""
+              onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
+            />
+            <button
+              type="button"
+              onClick={() => onDeleteExisting(img.id)}
+              className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        {pendingFiles.map((f, idx) => (
+          <div key={idx} className="relative group">
+            <img
+              src={URL.createObjectURL(f)}
+              className="h-16 w-16 object-cover rounded-lg border border-slate-200 opacity-70 ring-2 ring-emerald-300"
+              alt=""
+            />
+            <button
+              type="button"
+              onClick={() => onRemovePending(idx)}
+              className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+      {totalCount < maxTotal && (
+        <>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="flex items-center gap-2 px-3 py-1.5 border border-dashed border-slate-300 rounded-lg text-sm text-slate-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors"
+          >
+            <ImageIcon className="w-4 h-4" />
+            Thêm ảnh ({totalCount}/{maxTotal})
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            onChange={handleChange}
+            className="hidden"
+          />
+        </>
+      )}
+      {totalCount >= maxTotal && (
+        <p className="text-xs text-amber-600">Đã đạt tối đa {maxTotal} ảnh.</p>
+      )}
+    </div>
+  );
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export function AdminDashboard() {
-  const navigate = useNavigate();
-  // Auth state - moved to top level to fix hooks violation
+  // ── Auth ────────────────────────────────────────────────────────────────────
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [loginEmail, setLoginEmail] = useState("admin@gmail.com");
-  const [loginPassword, setLoginPassword] = useState("password");
+  const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
 
-  // Dashboard state
-  const [activeTab, setActiveTab] = useState<
-    "pois" | "tours" | "businesses" | "pending-approval"
-  >("tours");
+  // ── Tabs ────────────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<"dashboard" | "pois" | "tours" | "businesses">("dashboard");
+
+  // ── Maps ─────────────────────────────────────────────────────────────────────
+  const mapRef = useRef<L.Map | null>(null);
+
+  // ── POI state ────────────────────────────────────────────────────────────────
   const [selectedPoi, setSelectedPoi] = useState<POI | null>(null);
   const [isEditingPoi, setIsEditingPoi] = useState(false);
   const [newPoiPos, setNewPoiPos] = useState<[number, number] | null>(null);
+  const [poiSearchText, setPoiSearchText] = useState("");
+
+  // POI form state
+  const [poiForm, setPoiForm] = useState<Partial<POI>>({
+    name: "", description: "", lat: 0, lng: 0, range_m: 0,
+  });
+  const [poiNewImages, setPoiNewImages] = useState<File[]>([]);
+  const [poiDeleteImageIds, setPoiDeleteImageIds] = useState<number[]>([]);
+
+  // ── Tour state ───────────────────────────────────────────────────────────────
+  const [selectedTourId, setSelectedTourId] = useState<number | null>(null);
   const [isCreatingTour, setIsCreatingTour] = useState(false);
   const [isEditingTour, setIsEditingTour] = useState(false);
   const [editingTourId, setEditingTourId] = useState<number | null>(null);
-  const [currentTour, setCurrentTour] = useState<Partial<Tour>>({
-    title: "",
-    description: "", // ✅ PHASE 2 C7: Tour description field
-    poi_ids: [],
-    image: "",
-  });
-  const [toasts, setToasts] = useState<
-    Array<{ id: string; message: string; type: "error" | "success" }>
-  >([]);
-  // ✅ FIX #5: Track loading state for CRUD operations (NFR-LOAD-01)
-  const [operationLoading, setOperationLoading] = useState(false);
-
-  // ✅ PHASE 1 C4: POI search state
-  const [poiSearchText, setPoiSearchText] = useState("");
-
-  // ✅ PHASE 1 C1, C3: File upload states for POI
-  const [poiImageFile, setPoiImageFile] = useState<File | null>(null);
-  const [poiImagePreview, setPoiImagePreview] = useState<string>("");
-  const [removePoiImage, setRemovePoiImage] = useState(false);
-
-  // ✅ PHASE 1 C5: Map reference for flyTo
-  const mapRef = useRef<L.Map | null>(null);
-
-  // ✅ PHASE 2 C7, C16: Tour search + POI search in form
   const [tourSearchText, setTourSearchText] = useState("");
   const [tourPoiSearchText, setTourPoiSearchText] = useState("");
+  const [showTourModal, setShowTourModal] = useState(false);
 
-  // ✅ PHASE 2 C6: Tour image file upload state
-  const [tourImageFile, setTourImageFile] = useState<File | null>(null);
-  const [tourImagePreview, setTourImagePreview] = useState<string>("");
-  const [removeTourImage, setRemoveTourImage] = useState(false);
+  // Tour form state
+  const [tourForm, setTourForm] = useState<Partial<Tour>>({
+    name: "", description: "", poi_ids: [],
+  });
+  const [tourNewImages, setTourNewImages] = useState<File[]>([]);
+  const [tourDeleteImageIds, setTourDeleteImageIds] = useState<number[]>([]);
 
-  // ✅ PHASE 2 C8, C18: Track selected tour for map isolation
-  const [selectedTourId, setSelectedTourId] = useState<number | null>(null);
+  // ── Dashboard stats ──────────────────────────────────────────────────────────
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
-  // Use custom hooks for API management (with token)
-  const {
-    pois,
-    loading: loadingPois,
-    fetchPois,
-    savePoi,
-    deletePoi,
-  } = usePOIs(authToken);
-  const {
-    tours,
-    loading: loadingTours,
-    fetchTours,
-    saveTour,
-    deleteTour,
-  } = useTours(authToken);
+  // ── Misc ─────────────────────────────────────────────────────────────────────
+  const [toasts, setToasts] = useState<Array<{ id: string; message: string; type: "error" | "success" }>>([]);
+  const [operationLoading, setOperationLoading] = useState(false);
 
+  // ── Hooks ────────────────────────────────────────────────────────────────────
+  const { pois, loading: loadingPois, fetchPois, savePoi, deletePoi, deleteBusinessPoi } = usePOIs(authToken);
+  const { tours, loading: loadingTours, fetchTours, saveTour, deleteTour } = useTours(authToken);
+
+  // ─── Toast helpers ────────────────────────────────────────────────────────────
   const showToast = (message: string, type: "error" | "success" = "error") => {
     const id = Date.now().toString();
-    setToasts((prev) => [...prev, { id, message, type }]);
+    setToasts((p) => [...p, { id, message, type }]);
   };
+  const removeToast = (id: string) => setToasts((p) => p.filter((t) => t.id !== id));
 
-  const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  // ✅ PHASE 1 C1: Handler for POI image selection
-  const handlePoiImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      // Validate file size (5MB max)
-      if (file.size > 5 * 1024 * 1024) {
-        showToast("Ảnh không được vượt quá 5MB", "error");
-        return;
-      }
-      setPoiImageFile(file);
-      setRemovePoiImage(false);
-
-      // Show preview
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        setPoiImagePreview(evt.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  // ✅ PHASE 1 C5: Handler for POI click - flyTo + select
-  const handlePoiItemClick = (poi: POI) => {
-    setSelectedPoi(poi);
-    if (mapRef.current) {
-      mapRef.current.flyTo([poi.lat, poi.lng], 18, { duration: 1 });
-    }
-  };
-
+  // ─── Effects ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const savedToken = localStorage.getItem("authToken");
-    if (savedToken) {
-      setAuthToken(savedToken);
-      setIsLoggedIn(true);
-    }
+    const token = localStorage.getItem("adminToken");
+    if (token) { setAuthToken(token); setIsLoggedIn(true); }
   }, []);
 
-  // ✅ FIX #1: Auto-fetch POIs/Tours after login (FR-02.1, FR-03.1)
-  // ✅ FIX #6: Show error toast when initial fetch fails (NFR-ERR-02)
   useEffect(() => {
-    if (isLoggedIn && authToken) {
-      fetchPois().catch((err) => {
-        console.error("Failed to load POIs:", err);
-        showToast("Lỗi tải danh sách POI. Vui lòng cố gắng lại.", "error");
-      });
-      fetchTours().catch((err) => {
-        console.error("Failed to load Tours:", err);
-        showToast("Lỗi tải danh sách Tour. Vui lòng cố gắng lại.", "error");
-      });
-    }
+    if (!isLoggedIn || !authToken) return;
+    fetchPois().catch((e) => { console.error(e); showToast("Lỗi tải POI", "error"); });
+    fetchTours().catch((e) => { console.error(e); showToast("Lỗi tải Tour", "error"); });
   }, [isLoggedIn, authToken, fetchPois, fetchTours]);
 
-  // ✅ PHASE 2 C7 + FR-03.19: fitBounds to selected tour POIs
+  // Fetch dashboard stats when tab active
+  useEffect(() => {
+    if (activeTab !== "dashboard" || !authToken) return;
+    setStatsLoading(true);
+    fetch("/api/admin/dashboard/stats", {
+      headers: { Authorization: `Bearer ${authToken}` },
+    })
+      .then((r) => r.json())
+      .then((data) => setStats(data))
+      .catch(() => showToast("Lỗi tải thống kê", "error"))
+      .finally(() => setStatsLoading(false));
+  }, [activeTab, authToken]);
+
+  // fitBounds when selecting tour
   useEffect(() => {
     if (!mapRef.current || selectedTourId === null) return;
-
-    // Find selected tour
-    const selectedTour = tours.find((t) => t.id === selectedTourId);
-    if (!selectedTour || !selectedTour.pois || selectedTour.pois.length === 0)
-      return;
-
-    // ✅ v1.4: Use detailed pois array from selectedTour (already has lat/lng)
-    const tourPois = selectedTour.pois;
-    if (tourPois.length === 0) return;
-
-    // Build bounding box from tour POI coordinates
-    const bounds = L.latLngBounds(tourPois.map((p) => [p.lat, p.lng]));
-
-    // Fit map to bounds with padding
+    const tour = tours.find((t) => t.id === selectedTourId);
+    if (!tour?.pois?.length) return;
+    const bounds = L.latLngBounds(tour.pois.map((p) => [p.lat, p.lng] as [number, number]));
     mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
   }, [selectedTourId, tours]);
 
-  // ✅ FIX: Reset selectedTourId when switching away from Tours tab (FR-03.20 + prevent state leak)
   useEffect(() => {
-    if (activeTab === "pois") {
-      setSelectedTourId(null);
-    }
+    if (activeTab === "pois") setSelectedTourId(null);
   }, [activeTab]);
 
-  // ✅ FIX: Populate currentTour state with poi_ids when opening Edit Tour panel (FR-03.13)
+  // Populate tour form on edit
   useEffect(() => {
-    if (isEditingTour && editingTourId !== null) {
-      const tourToEdit = tours.find((t) => t.id === editingTourId);
-      if (tourToEdit) {
-        // ✅ CRITICAL: Extract poi_ids array to populate form correctly
-        // poi_ids might come from tour.poi_ids (field) or computed from tour.pois array
-        const poiIds =
-          tourToEdit.poi_ids ||
-          (tourToEdit.pois ? tourToEdit.pois.map((p: any) => p.poi_id) : []);
-
-        setCurrentTour({
-          id: tourToEdit.id,
-          title: tourToEdit.title,
-          description: tourToEdit.description,
-          poi_ids: poiIds, // ✅ Explicitly set poi_ids for form
-          image: tourToEdit.image,
-        });
-
-        // Set tour image preview
-        setTourImagePreview(
-          tourToEdit.image ? `/uploads/tours/${tourToEdit.image}` : "",
-        );
-      }
-    }
+    if (!isEditingTour || !editingTourId) return;
+    const t = tours.find((x) => x.id === editingTourId);
+    if (!t) return;
+    const poiIds = t.poi_ids || (t.pois ? t.pois.map((p) => p.poi_id) : []);
+    setTourForm({ id: t.id, name: t.name, description: t.description, poi_ids: poiIds });
+    setTourNewImages([]);
+    setTourDeleteImageIds([]);
   }, [isEditingTour, editingTourId, tours]);
+
+  // ─── Login ────────────────────────────────────────────────────────────────────
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError("");
+    try {
+      const res = await fetch("/api/auth/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      });
+      if (!res.ok) {
+        const { error } = await res.json();
+        throw new Error(error || "Đăng nhập thất bại");
+      }
+      const { token } = await res.json();
+      localStorage.setItem("adminToken", token);
+      setAuthToken(token);
+      setIsLoggedIn(true);
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : "Lỗi không xác định");
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  // ─── POI handlers ────────────────────────────────────────────────────────────
+  const openPoiCreate = (lat: number, lng: number) => {
+    setNewPoiPos([lat, lng]);
+    setPoiForm({ name: "", description: "", lat, lng, range_m: 0 });
+    setPoiNewImages([]);
+    setPoiDeleteImageIds([]);
+    setSelectedPoi(null);
+    setIsEditingPoi(true);
+  };
+
+  const openPoiEdit = (poi: POI) => {
+    setPoiForm({ ...poi });
+    setPoiNewImages([]);
+    setPoiDeleteImageIds([]);
+    setSelectedPoi(poi);
+    setIsEditingPoi(true);
+  };
 
   const handleSavePoi = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPoi) return;
+    const validationErr = validatePOI(poiForm);
+    if (validationErr) { showToast(validationErr, "error"); return; }
 
-    // Validate
-    const validationError = validatePOI(selectedPoi);
-    if (validationError) {
-      showToast(validationError, "error");
-      return;
-    }
-
-    // ✅ FIX #5: Set loading state for CRUD operation (NFR-LOAD-01)
     setOperationLoading(true);
     try {
-      // ✅ PHASE 1 C1, C3: Pass imageFile and removeImage to savePoi
-      await savePoi(selectedPoi, poiImageFile, removePoiImage);
+      await savePoi(poiForm, poiNewImages, poiDeleteImageIds);
       setIsEditingPoi(false);
       setSelectedPoi(null);
       setNewPoiPos(null);
-      setPoiImageFile(null);
-      setPoiImagePreview("");
-      setRemovePoiImage(false);
-      showToast(
-        selectedPoi.id ? "Cập nhật POI thành công" : "Tạo POI thành công",
-        "success",
-      );
-    } catch (error) {
-      console.error(error);
-      showToast("Lỗi lưu POI", "error");
+      setPoiForm({ name: "", description: "", lat: 0, lng: 0, range_m: 0 });
+      setPoiNewImages([]);
+      setPoiDeleteImageIds([]);
+      showToast(poiForm.id ? "Cập nhật POI thành công" : "Tạo POI thành công", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Lỗi lưu POI", "error");
     } finally {
-      // ✅ FIX #5: Clear loading state (NFR-LOAD-01)
       setOperationLoading(false);
     }
   };
 
-  const handleDeletePoi = async (id: number) => {
-    if (!confirm("Bạn có chắc chắn muốn xóa điểm này?")) return;
-    // ✅ FIX #5: Set loading state (NFR-LOAD-01)
+  const handleDeletePoi = async (poi: POI) => {
+    if (!poi.id) return;
+    const confirmed = confirm(
+      `Bạn có chắc muốn xóa POI "${poi.name}"? Hành động này không thể hoàn tác.`
+    );
+    if (!confirmed) return;
     setOperationLoading(true);
     try {
-      await deletePoi(id);
+      // BR-01: Mỗi loại POI dùng đúng endpoint — cả hai đều kiểm tra tour_pois trước khi xóa
+      const result =
+        poi.owner_type === "business"
+          ? await deleteBusinessPoi(poi.id)
+          : await deletePoi(poi.id);
+
+      if (result.tours?.length) {
+        showToast(
+          `Không thể xóa POI này vì đang nằm trong Tour: ${result.tours.map((t) => t.name).join(", ")}. Vui lòng xóa POI khỏi các Tour trước.`,
+          "error"
+        );
+        return;
+      }
       setSelectedPoi(null);
+      setIsEditingPoi(false);
       showToast("Xóa POI thành công", "success");
-    } catch (error) {
-      console.error(error);
-      showToast("Lỗi xóa POI", "error");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Lỗi xóa POI", "error");
     } finally {
       setOperationLoading(false);
     }
+  };
+
+
+  // ─── Tour handlers ────────────────────────────────────────────────────────────
+  const openTourCreate = () => {
+    setTourForm({ name: "", description: "", poi_ids: [] });
+    setTourNewImages([]);
+    setTourDeleteImageIds([]);
+    setIsCreatingTour(true);
+    setIsEditingTour(false);
+    setEditingTourId(null);
+    setShowTourModal(true);
+  };
+
+  const openTourEdit = (tour: Tour) => {
+    setEditingTourId(tour.id!);
+    setIsEditingTour(true);
+    setIsCreatingTour(false);
+    setShowTourModal(true);
   };
 
   const handleSaveTour = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentTour.title || currentTour.poi_ids?.length === 0) return;
+    const validationErr = validateTour(tourForm as Tour);
+    if (validationErr) { showToast(validationErr, "error"); return; }
 
-    // Validate
-    const validationError = validateTour(currentTour as Tour);
-    if (validationError) {
-      showToast(validationError, "error");
-      return;
-    }
-
-    // ✅ FIX #5: Set loading state (NFR-LOAD-01)
     setOperationLoading(true);
     try {
-      // ✅ PHASE 2 C6: Pass imageFile and removeImage to saveTour
-      await saveTour(currentTour, tourImageFile, removeTourImage);
+      await saveTour(tourForm, tourNewImages, tourDeleteImageIds);
       setIsCreatingTour(false);
       setIsEditingTour(false);
+      setShowTourModal(false);
       setEditingTourId(null);
-      setCurrentTour({ title: "", description: "", poi_ids: [], image: "" });
-      setTourImageFile(null);
-      setTourImagePreview("");
-      setRemoveTourImage(false);
-      setTourPoiSearchText("");
-      setSelectedTourId(null); // Reset map isolation
-      showToast(
-        currentTour.id ? "Cập nhật Tour thành công" : "Tạo Tour thành công",
-        "success",
-      );
-    } catch (error) {
-      console.error(error);
-      showToast("Lỗi lưu Tour", "error");
+      setTourForm({ name: "", description: "", poi_ids: [] });
+      setTourNewImages([]);
+      setTourDeleteImageIds([]);
+      setSelectedTourId(null);
+      showToast(isEditingTour ? "Cập nhật Tour thành công" : "Tạo Tour thành công", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Lỗi lưu Tour", "error");
     } finally {
       setOperationLoading(false);
     }
   };
 
   const handleDeleteTour = async (id: number) => {
-    if (!confirm("Bạn có chắc chắn muốn xóa tour này?")) return;
-    // ✅ FIX #5: Set loading state (NFR-LOAD-01)
+    const tour = tours.find((t) => t.id === id);
+    if (!confirm(`Bạn có chắc muốn xóa Tour "${tour?.name}"?`)) return;
     setOperationLoading(true);
     try {
       await deleteTour(id);
       showToast("Xóa Tour thành công", "success");
-    } catch (error) {
-      console.error(error);
-      showToast("Lỗi xóa Tour", "error");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Lỗi xóa Tour", "error");
     } finally {
       setOperationLoading(false);
     }
   };
 
+  // ─── POI picker for Tour form ──────────────────────────────────────────────
+  const togglePoiInTour = (poiId: number) => {
+    const current = tourForm.poi_ids || [];
+    const idx = current.indexOf(poiId);
+    if (idx >= 0) {
+      setTourForm({ ...tourForm, poi_ids: current.filter((id) => id !== poiId) });
+    } else {
+      setTourForm({ ...tourForm, poi_ids: [...current, poiId] });
+    }
+  };
+
+  // ─── Filtered lists ───────────────────────────────────────────────────────
+  const filteredPois = useMemo(
+    () =>
+      pois.filter((p) =>
+        p.name.toLowerCase().includes(poiSearchText.toLowerCase())
+      ),
+    [pois, poiSearchText]
+  );
+
+  const filteredTours = useMemo(
+    () =>
+      tours.filter((t) =>
+        t.name.toLowerCase().includes(tourSearchText.toLowerCase())
+      ),
+    [tours, tourSearchText]
+  );
+
+  const selectedTour = useMemo(
+    () => tours.find((t) => t.id === selectedTourId),
+    [tours, selectedTourId]
+  );
+
+  // ── Map helpers ───────────────────────────────────────────────────────────
   const MapEvents = () => {
     const mapInstance = useMap();
-    // ✅ PHASE 1 C5: Store map reference for flyTo
-    useEffect(() => {
-      mapRef.current = mapInstance;
-    }, [mapInstance]);
-
+    useEffect(() => { mapRef.current = mapInstance; }, [mapInstance]);
     useMapEvents({
       click(e) {
         if (activeTab === "pois" && !isEditingPoi) {
-          setNewPoiPos([e.latlng.lat, e.latlng.lng]);
-          setSelectedPoi({
-            name: "",
-            type: POIType.MAIN,
-            lat: e.latlng.lat,
-            lng: e.latlng.lng,
-            description: "",
-            radius: 0,
-          });
-          setIsEditingPoi(true);
+          openPoiCreate(e.latlng.lat, e.latlng.lng);
         }
       },
     });
     return null;
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginLoading(true);
-    setLoginError("");
-
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Đăng nhập thất bại");
-      }
-
-      const { token } = await res.json();
-      localStorage.setItem("authToken", token);
-
-      setAuthToken(token);
-      setIsLoggedIn(true);
-    } catch (error) {
-      setLoginError(
-        error instanceof Error ? error.message : "Lỗi không xác định",
-      );
-    } finally {
-      setLoginLoading(false);
-    }
-  };
-
+  // ─────────────────────────────────────────────────────────────────────────
   if (!isLoggedIn) {
     return (
       <LoginPage
@@ -461,678 +512,664 @@ export function AdminDashboard() {
     );
   }
 
+  const showMap = activeTab === "pois" || activeTab === "tours";
+
   return (
     <div className="h-full flex bg-slate-50 text-slate-900 overflow-hidden">
-      {" "}
       <ToastContainer toasts={toasts} onRemove={removeToast} />
-      {/* Sidebar */}
-      <aside className="w-80 border-r border-slate-200 flex flex-col bg-white backdrop-blur-xl">
-        <div className="p-6 border-bottom border-slate-200">
-          <div className="flex items-center gap-3 mb-8">
+
+      {/* ── Sidebar ─────────────────────────────────────────────────────────── */}
+      <aside className="w-80 border-r border-slate-200 flex flex-col bg-white">
+        {/* Logo */}
+        <div className="p-5 border-b border-slate-100">
+          <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
               <Navigation className="text-white w-5 h-5" />
             </div>
             <span className="font-bold text-lg tracking-tight">TourAdmin</span>
           </div>
-
-          <nav className="space-y-2">
-            <button
-              onClick={() => setActiveTab("pois")}
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all",
-                activeTab === "pois"
-                  ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                  : "text-slate-600 hover:bg-slate-100",
-              )}
-            >
-              <MapPin className="w-5 h-5" />
-              <span className="font-medium">Quản lý POIs</span>
-            </button>
-            <button
-              onClick={() => setActiveTab("tours")}
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all",
-                activeTab === "tours"
-                  ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                  : "text-slate-600 hover:bg-slate-100",
-              )}
-            >
-              <Layers className="w-5 h-5" />
-              <span className="font-medium">Quản lý Tours</span>
-            </button>
-
-            {/* ✅ v1.6: Business Management Menu */}
-            <div className="space-y-1">
-              <button
-                onClick={() =>
-                  setActiveTab(
-                    activeTab === "businesses" ||
-                      activeTab === "pending-approval"
-                      ? "tours"
-                      : "businesses",
-                  )
-                }
-                className={cn(
-                  "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium",
-                  activeTab === "businesses" || activeTab === "pending-approval"
-                    ? "bg-emerald-50 text-emerald-600 border-l-4 border-emerald-500"
-                    : "text-slate-600 hover:bg-slate-100",
-                )}
-              >
-                <div className="w-5 h-5 text-lg">🏢</div>
-                <span>Doanh Nghiệp</span>
-              </button>
-
-              {/* Sub-menu: Pending POIs */}
-              {(activeTab === "businesses" ||
-                activeTab === "pending-approval") && (
-                <button
-                  onClick={() => setActiveTab("pending-approval")}
-                  className={cn(
-                    "w-full flex items-center gap-3 px-4 py-3 pl-8 rounded-xl transition-all font-medium text-sm",
-                    activeTab === "pending-approval"
-                      ? "bg-amber-50 text-amber-600"
-                      : "text-slate-600 hover:bg-slate-100",
-                  )}
-                >
-                  <span>📋 POIs chờ duyệt</span>
-                </button>
-              )}
-            </div>
-          </nav>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Nav */}
+        <nav className="p-4 space-y-1 border-b border-slate-100">
+          {(
+            [
+              { key: "dashboard", icon: <BarChart2 className="w-4 h-4" />, label: "Dashboard" },
+              { key: "pois",      icon: <MapPin className="w-4 h-4" />,    label: "Quản lý POI" },
+              { key: "tours",     icon: <Layers className="w-4 h-4" />,    label: "Quản lý Tour" },
+              { key: "businesses",icon: <Building2 className="w-4 h-4" />, label: "Doanh nghiệp" },
+            ] as { key: typeof activeTab; icon: React.ReactNode; label: string }[]
+          ).map(({ key, icon, label }) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all text-sm font-medium",
+                activeTab === key
+                  ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20"
+                  : "text-slate-600 hover:bg-slate-100"
+              )}
+            >
+              {icon}
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Panel content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {/* ─ POI panel ─ */}
           {activeTab === "pois" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between px-2">
-                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-widest">
-                  Danh sách POIs
-                </h3>
-                <span className="text-[10px] bg-slate-100 px-2 py-1 rounded-full text-slate-600">
-                  {loadingPois
-                    ? "..."
-                    : pois.filter((p) =>
-                        p.name
-                          .toLowerCase()
-                          .includes(poiSearchText.toLowerCase()),
-                      ).length}
-                </span>
-              </div>
-
-              {/* ✅ PHASE 1 C4: POI Search field */}
-              <input
-                type="text"
-                placeholder="🔍 Tìm kiếm POI..."
-                value={poiSearchText}
-                onChange={(e) => setPoiSearchText(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-sm"
-              />
-
-              {/* Filter POIs by search text */}
-              {pois
-                .filter((p) =>
-                  p.name.toLowerCase().includes(poiSearchText.toLowerCase()),
-                )
-                .map((poi) => (
-                  <div
-                    key={poi.id}
-                    onClick={() => handlePoiItemClick(poi)}
-                    className={cn(
-                      "p-4 rounded-xl border transition-all cursor-pointer group",
-                      selectedPoi?.id === poi.id
-                        ? "bg-slate-100 border-slate-200"
-                        : "bg-slate-50 border-slate-200 hover:border-slate-300",
-                    )}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 gap-3">
-                        <h4 className="font-semibold text-sm">{poi.name}</h4>
-                        <p className="text-xs text-slate-700">{poi.type}</p>
-                        {poi.radius ? (
-                          <p className="text-xs text-slate-700">
-                            Radius: {poi.radius}m
-                          </p>
-                        ) : null}
-                        {poi.image && (
-                          <img
-                            src={`/uploads/pois/${poi.image}`}
-                            alt={poi.name}
-                            className="mt-2 h-16 w-full object-cover rounded-lg"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display =
-                                "none";
-                            }}
-                          />
-                        )}
-                      </div>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedPoi(poi);
-                            setIsEditingPoi(true);
-                          }}
-                          className="p-2 text-slate-600 hover:text-emerald-500 transition-colors"
-                          title="Chỉnh sửa"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeletePoi(poi.id!);
-                          }}
-                          className="p-2 text-slate-600 hover:text-red-500 transition-all"
-                          title="Xóa"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          )}
-
-          {activeTab === "tours" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between px-2 mb-2">
-                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-widest">
-                  Danh sách Tours
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-slate-600 uppercase tracking-widest">
+                  POIs ({filteredPois.length})
                 </h3>
                 <button
-                  onClick={() => {
-                    setIsCreatingTour(true);
-                    setTourImageFile(null);
-                    setTourImagePreview("");
-                  }}
-                  className="p-1 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                  onClick={() => openPoiCreate(10.762, 106.704)}
+                  className="p-1.5 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors"
+                  title="Thêm POI"
                 >
                   <Plus className="w-4 h-4" />
                 </button>
               </div>
-
-              {/* ✅ PHASE 2 C7, C16: Tour Search field */}
               <input
                 type="text"
-                placeholder="🔍 Tìm kiếm Tour..."
-                value={tourSearchText}
-                onChange={(e) => setTourSearchText(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-sm mx-2"
+                placeholder="🔍 Tìm POI..."
+                value={poiSearchText}
+                onChange={(e) => setPoiSearchText(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400"
               />
-
-              {/* Tours list filtered by search */}
-              {tours
-                .filter((t) =>
-                  t.title.toLowerCase().includes(tourSearchText.toLowerCase()),
-                )
-                .map((tour) => (
+              {loadingPois ? (
+                <LoadingSpinner />
+              ) : (
+                filteredPois.map((poi) => (
                   <div
-                    key={tour.id}
+                    key={poi.id}
                     onClick={() => {
-                      const isCurrentlySelected = selectedTourId === tour.id;
-                      setSelectedTourId(isCurrentlySelected ? null : tour.id!);
+                      setSelectedPoi(poi);
+                      mapRef.current?.flyTo([poi.lat, poi.lng], 18, { duration: 0.8 });
                     }}
                     className={cn(
-                      "p-3 rounded-xl border transition-all cursor-pointer group",
-                      selectedTourId === tour.id
+                      "p-3 rounded-xl border cursor-pointer transition-all group",
+                      selectedPoi?.id === poi.id
                         ? "bg-emerald-50 border-emerald-300"
-                        : "bg-slate-50 border-slate-200 hover:border-slate-300",
+                        : "bg-white border-slate-200 hover:border-slate-300"
                     )}
                   >
-                    {/* Tour thumbnail */}
-                    {tour.image && (
-                      <img
-                        src={`/uploads/tours/${tour.image}`}
-                        alt={tour.title}
-                        className="w-full h-20 object-cover rounded-lg mb-2"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = "none";
-                        }}
-                      />
-                    )}
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-semibold text-sm truncate">{poi.name}</h4>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {poi.lat.toFixed(4)}, {poi.lng.toFixed(4)}
+                          {poi.range_m ? ` · ${poi.range_m}m` : ""}
+                        </p>
+                        {poi.owner_type === "business" && (
+                          <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">
+                            Doanh nghiệp
+                          </span>
+                        )}
+                        <ImageGrid images={poi.images} />
+                      </div>
+                      {poi.owner_type === "admin" && (
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openPoiEdit(poi); }}
+                            className="p-1.5 text-slate-500 hover:text-emerald-600 transition-colors"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeletePoi(poi); }}
+                            className="p-1.5 text-slate-500 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                      {poi.owner_type === "business" && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeletePoi(poi); }}
+                          className="p-1.5 text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                          title="Xóa POI doanh nghiệp"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
 
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-sm">{tour.title}</h4>
-                        {/* POI order badges */}
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {(tour.poi_ids || []).map((id, idx) => {
-                            const poi = pois.find((p) => p.id === id);
-                            return (
-                              <span
-                                key={idx}
-                                className="text-xs bg-slate-100 px-2 py-1 rounded-md text-slate-600"
-                              >
-                                {idx + 1}. {poi?.name || "Unknown"}
-                              </span>
-                            );
-                          })}
+          {/* ─ Tour panel ─ */}
+          {activeTab === "tours" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-slate-600 uppercase tracking-widest">
+                  Tours ({filteredTours.length})
+                </h3>
+                <button
+                  onClick={openTourCreate}
+                  className="p-1.5 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+              <input
+                type="text"
+                placeholder="🔍 Tìm Tour..."
+                value={tourSearchText}
+                onChange={(e) => setTourSearchText(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400"
+              />
+              {loadingTours ? (
+                <LoadingSpinner />
+              ) : (
+                filteredTours.map((tour) => (
+                  <div
+                    key={tour.id}
+                    onClick={() =>
+                      setSelectedTourId(selectedTourId === tour.id ? null : tour.id!)
+                    }
+                    className={cn(
+                      "p-3 rounded-xl border cursor-pointer transition-all group",
+                      selectedTourId === tour.id
+                        ? "bg-emerald-50 border-emerald-300"
+                        : "bg-white border-slate-200 hover:border-slate-300"
+                    )}
+                  >
+                    <ImageGrid images={tour.images} />
+                    <div className="flex items-start justify-between mt-1">
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-semibold text-sm truncate">{tour.name}</h4>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {tour.pois?.length || 0} POIs
+                        </p>
+                        {/* POI order display */}
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {(tour.pois || []).map((tp) => (
+                            <span
+                              key={tp.poi_id}
+                              className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600"
+                            >
+                              {tp.position}. {tp.name}
+                            </span>
+                          ))}
                         </div>
                       </div>
-
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all ml-2">
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all ml-1">
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingTourId(tour.id!);
-                            setIsEditingTour(true);
-                            setCurrentTour({ ...tour });
-                            setTourImageFile(null);
-                            setTourImagePreview(
-                              tour.image ? `/uploads/tours/${tour.image}` : "",
-                            );
-                          }}
-                          className="p-2 text-slate-600 hover:text-emerald-500 transition-colors"
+                          onClick={(e) => { e.stopPropagation(); openTourEdit(tour); }}
+                          className="p-1.5 text-slate-500 hover:text-emerald-600"
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteTour(tour.id!);
-                          }}
-                          className="p-2 text-slate-600 hover:text-red-500 transition-all"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteTour(tour.id!); }}
+                          className="p-1.5 text-slate-500 hover:text-red-500"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
                   </div>
-                ))}
+                ))
+              )}
             </div>
           )}
 
-          {/* ✅ v1.6: Admin Business Management Section */}
+          {/* ─ Business panel ─ */}
           {activeTab === "businesses" && (
             <AdminBusinessesSection authToken={authToken} />
           )}
 
-          {/* ✅ v1.6: Admin Pending POI Approval Section */}
-          {activeTab === "pending-approval" && (
-            <AdminPendingPoisSection authToken={authToken} />
-          )}
+          {/* ─ Dashboard panel is shown in main area ─ */}
         </div>
 
-        <div className="p-6 border-t border-slate-200">
+        {/* Logout */}
+        <div className="p-4 border-t border-slate-100">
           <button
             onClick={() => {
-              localStorage.removeItem("authToken");
+              localStorage.removeItem("adminToken");
+              localStorage.removeItem("adminUser");
               setIsLoggedIn(false);
               setAuthToken(null);
             }}
-            className="w-full flex items-center justify-center gap-2 text-slate-600 hover:text-slate-900 transition-colors text-sm font-medium"
+            className="w-full flex items-center justify-center gap-2 text-slate-500 hover:text-slate-800 transition-colors text-sm"
           >
             <LogOut className="w-4 h-4" />
             Đăng xuất
           </button>
         </div>
       </aside>
-      {/* Main Content (Map) - Truncated for brevity, same as before */}
-      <main className="flex-1 relative h-full">
-        <MapContainer
-          center={[10.7615, 106.7046]}
-          zoom={16}
-          className="h-full w-full z-0"
-        >
-          <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          />
-          <MapEvents />
 
-          {pois
-            .filter((poi) => {
-              if (activeTab === "tours" && selectedTourId !== null) {
-                const selectedTour = tours.find((t) => t.id === selectedTourId);
-                return (selectedTour?.poi_ids || []).includes(poi.id!);
-              }
-              return true;
-            })
-            .map((poi) => (
-              <Marker
-                key={poi.id}
-                position={[poi.lat, poi.lng]}
-                icon={getMarkerIcon(poi.type, selectedPoi?.id === poi.id)}
-                eventHandlers={{
-                  click: () => {
-                    setSelectedPoi(poi);
-                    setIsEditingPoi(false);
-                  },
-                }}
-              >
-                <Popup>
-                  <div className="p-2">
-                    <h3 className="font-bold text-zinc-900">{poi.name}</h3>
-                    <p className="text-xs text-slate-700">{poi.type}</p>
-                    {poi.description && (
-                      <p className="text-xs mt-2 text-slate-700">
-                        {poi.description}
-                      </p>
-                    )}
+      {/* ── Main Area ───────────────────────────────────────────────────────── */}
+      <main className="flex-1 relative h-full overflow-hidden">
+        {/* Dashboard stats */}
+        {activeTab === "dashboard" && (
+          <div className="h-full overflow-y-auto p-8 bg-slate-50">
+            <h1 className="text-2xl font-bold mb-6">📊 Dashboard</h1>
+            {statsLoading ? (
+              <LoadingSpinner />
+            ) : stats ? (
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                {[
+                  { label: "👤 Tổng người dùng",       value: stats.total_users },
+                  { label: "🏢 Tổng doanh nghiệp",     value: stats.total_businesses },
+                  { label: "📍 Tổng POI",              value: stats.total_pois },
+                  { label: "📍 POI của Admin",          value: stats.pois_by_admin },
+                  { label: "📍 POI doanh nghiệp",      value: stats.pois_by_business },
+                  { label: "🗺️ Tổng Tour",              value: stats.total_tours },
+                  { label: "🗺️ Tour của Admin",         value: stats.tours_by_admin },
+                  { label: "🗺️ Tour của Người dùng",   value: stats.tours_by_user },
+                ].map(({ label, value }) => (
+                  <div
+                    key={label}
+                    className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100"
+                  >
+                    <p className="text-slate-500 text-sm mb-1">{label}</p>
+                    <p className="text-3xl font-bold text-slate-800">{value}</p>
                   </div>
-                </Popup>
-              </Marker>
-            ))}
+                ))}
+              </div>
+            ) : (
+              <p className="text-slate-400">Không có dữ liệu</p>
+            )}
+          </div>
+        )}
 
-          {newPoiPos && <Marker position={newPoiPos} />}
+        {/* Map */}
+        {showMap && (
+          <MapContainer
+            center={[10.7615, 106.7046]}
+            zoom={14}
+            className="h-full w-full z-0"
+          >
+            <TileLayer
+              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            />
+            <MapEvents />
 
-          {activeTab === "tours" &&
-            tours
-              .filter((tour) => {
-                if (selectedTourId !== null) {
-                  return tour.id === selectedTourId;
+            {pois
+              .filter((poi) => {
+                if (activeTab === "tours" && selectedTourId !== null) {
+                  return (selectedTour?.poi_ids || []).includes(poi.id!);
                 }
                 return true;
               })
-              .map((tour) => {
-                const positions = (tour.pois || []).map(
-                  (p) => [p.lat, p.lng] as [number, number],
-                );
-
+              .map((poi) => {
+                const inTour = selectedTour?.pois?.find((tp) => tp.poi_id === poi.id);
                 return (
-                  <Polyline
-                    key={tour.id}
-                    positions={positions}
-                    color={selectedTourId === tour.id ? "#10b981" : "#94a3b8"}
-                    weight={selectedTourId === tour.id ? 5 : 3}
-                    opacity={selectedTourId === tour.id ? 1.0 : 0.4}
-                    dashArray={selectedTourId === tour.id ? "" : "10, 10"}
-                  />
+                  <React.Fragment key={poi.id}>
+                    <Marker
+                      position={[poi.lat, poi.lng]}
+                      icon={getMarkerIcon(
+                        selectedPoi?.id === poi.id,
+                        inTour?.position
+                      )}
+                      eventHandlers={{
+                        click: () => setSelectedPoi(poi),
+                      }}
+                    />
+                    {poi.range_m > 0 && (
+                      <Circle
+                        center={[poi.lat, poi.lng]}
+                        radius={poi.range_m}
+                        pathOptions={{ color: "#22c55e", fillColor: "#22c55e", fillOpacity: 0.05, weight: 1, dashArray: "4" }}
+                      />
+                    )}
+                  </React.Fragment>
                 );
               })}
 
-          {activeTab === "tours" &&
-            selectedTourId !== null &&
-            (() => {
-              const selectedTour = tours.find((t) => t.id === selectedTourId);
-              if (
-                !selectedTour ||
-                !selectedTour.pois ||
-                selectedTour.pois.length === 0
-              ) {
-                return null;
-              }
+            {newPoiPos && (
+              <Marker
+                position={newPoiPos}
+                icon={getMarkerIcon(true)}
+              />
+            )}
+          </MapContainer>
+        )}
 
-              const getOrderedMarkerIcon = (position: number) => {
-                return L.divIcon({
-                  html: `<div style="
-                    background-color: #10b981;
-                    width: 40px;
-                    height: 40px;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    font-size: 18px;
-                    font-weight: bold;
-                    color: white;
-                    border: 3px solid white;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                  ">
-                    ${position}
-                  </div>`,
-                  iconSize: [40, 40],
-                  iconAnchor: [20, 40],
-                  popupAnchor: [0, -40],
-                  className: "tour-marker",
-                });
-              };
+        {/* Business tab — no map, show placeholder */}
+        {activeTab === "businesses" && (
+          <div className="h-full flex items-center justify-center text-slate-400">
+            <Building2 className="w-8 h-8 mr-2" />
+            <span>Xem danh sách doanh nghiệp trong sidebar</span>
+          </div>
+        )}
 
-              return selectedTour.pois.map((poiData, idx) => (
-                <Marker
-                  key={`tour-${selectedTourId}-poi-${poiData.poi_id}`}
-                  position={[poiData.lat, poiData.lng]}
-                  icon={getOrderedMarkerIcon(poiData.position)}
-                  eventHandlers={{
-                    click: () => {
-                      const mainPoi = pois.find((p) => p.id === poiData.poi_id);
-                      if (mainPoi) {
-                        setSelectedPoi(mainPoi);
-                        setIsEditingPoi(false);
-                      }
-                    },
-                  }}
-                >
-                  <Popup>
-                    <div className="p-2">
-                      <h3 className="font-bold text-zinc-900">
-                        {poiData.name}
-                      </h3>
-                      <p className="text-xs text-slate-700">{poiData.type}</p>
-                      <p className="text-xs text-emerald-600 font-semibold mt-1">
-                        Vị trí #{poiData.position}
-                      </p>
-                      {poiData.description && (
-                        <p className="text-xs mt-2 text-slate-700">
-                          {poiData.description}
-                        </p>
-                      )}
-                    </div>
-                  </Popup>
-                </Marker>
-              ));
-            })()}
-        </MapContainer>
-
-        {/* Overlays - truncated for length */}
+        {/* ── POI Info Modal (read-only view) ─────────────────────────────── */}
         <AnimatePresence>
-          {isEditingPoi && selectedPoi && (
+          {selectedPoi && !isEditingPoi && (
             <motion.div
-              initial={{ x: 400 }}
-              animate={{ x: 0 }}
-              exit={{ x: 400 }}
-              className="absolute top-0 right-0 h-full w-96 bg-white/95 backdrop-blur-xl border-l border-slate-200 z-10 p-8 shadow-2xl overflow-y-auto"
+              key="poi-modal"
+              initial={{ opacity: 0, x: 30 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 30 }}
+              className="absolute top-4 right-4 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 z-[1000] max-h-[90vh] overflow-y-auto"
             >
-              <div className="flex items-center justify-between mb-8">
-                <h2 className="text-xl font-bold">
-                  {selectedPoi.id ? "Sửa POI" : "Thêm POI mới"}
-                </h2>
-                <button
-                  onClick={() => {
-                    setIsEditingPoi(false);
-                    setSelectedPoi(null);
-                    setNewPoiPos(null);
-                  }}
-                  className="p-2 hover:bg-slate-100 rounded-full"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <form onSubmit={handleSavePoi} className="space-y-6">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
-                    Tên điểm
-                  </label>
-                  <input
-                    required
-                    value={selectedPoi.name}
-                    onChange={(e) =>
-                      setSelectedPoi({ ...selectedPoi, name: e.target.value })
-                    }
-                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
-                    placeholder="Nhập tên điểm tham quan..."
-                  />
+              <div className="p-4">
+                <div className="flex items-start justify-between mb-3">
+                  <h3 className="font-bold text-base">{selectedPoi.name}</h3>
+                  <button onClick={() => setSelectedPoi(null)} className="text-slate-400 hover:text-slate-600">
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
+                <p className="text-sm text-slate-600 mb-2">{selectedPoi.description}</p>
+                <div className="text-xs text-slate-500 space-y-1 mb-3">
+                  <div>📍 {selectedPoi.lat.toFixed(6)}, {selectedPoi.lng.toFixed(6)}</div>
+                  <div>📏 Phạm vi: {selectedPoi.range_m}m</div>
+                  <div>👤 {selectedPoi.owner_type === "admin" ? "Admin" : "Doanh nghiệp"}</div>
+                </div>
+                <ImageGrid images={selectedPoi.images} size="md" />
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
-                    Loại điểm
-                  </label>
-                  <select
-                    value={selectedPoi.type}
-                    onChange={(e) =>
-                      setSelectedPoi({
-                        ...selectedPoi,
-                        type: e.target.value as POIType,
-                      })
-                    }
-                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
-                  >
-                    {Object.values(POIType).map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
+                {/* Translation badges */}
+                {selectedPoi.translations && selectedPoi.translations.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {selectedPoi.translations.map((tr) => (
+                      <span key={tr.language_code} className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 uppercase">
+                        {tr.language_code}
+                      </span>
                     ))}
-                  </select>
+                  </div>
+                )}
+
+                <div className="flex gap-2 mt-4">
+                  {selectedPoi.owner_type === "admin" && (
+                    <button
+                      onClick={() => openPoiEdit(selectedPoi)}
+                      className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-500 text-white text-sm py-2 rounded-lg hover:bg-emerald-600 transition-colors"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" /> Sửa
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDeletePoi(selectedPoi)}
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-red-50 text-red-500 text-sm py-2 rounded-lg hover:bg-red-100 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Xóa
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── POI Form Panel ────────────────────────────────────────────────── */}
+        <AnimatePresence>
+          {isEditingPoi && (
+            <motion.div
+              key="poi-form"
+              initial={{ opacity: 0, x: 30 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 30 }}
+              className="absolute top-4 right-4 w-96 bg-white rounded-2xl shadow-xl border border-slate-100 z-[1000] max-h-[95vh] overflow-y-auto"
+            >
+              <form onSubmit={handleSavePoi} className="p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold">{poiForm.id ? "Sửa POI" : "Thêm POI mới"}</h3>
+                  <button
+                    type="button"
+                    onClick={() => { setIsEditingPoi(false); setNewPoiPos(null); setSelectedPoi(null); }}
+                    className="text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
-                    Mô tả
-                  </label>
-                  <textarea
-                    value={selectedPoi.description}
-                    onChange={(e) =>
-                      setSelectedPoi({
-                        ...selectedPoi,
-                        description: e.target.value,
-                      })
-                    }
-                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 h-32 focus:outline-none focus:border-emerald-500"
-                    placeholder="Mô tả chi tiết về địa điểm này..."
+                <label className="block">
+                  <span className="text-xs font-semibold text-slate-600">Tên POI *</span>
+                  <input
+                    type="text"
+                    maxLength={255}
+                    required
+                    value={poiForm.name || ""}
+                    onChange={(e) => setPoiForm({ ...poiForm, name: e.target.value })}
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400"
                   />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-semibold text-slate-600">Mô tả *</span>
+                  <textarea
+                    required
+                    rows={3}
+                    value={poiForm.description || ""}
+                    onChange={(e) => setPoiForm({ ...poiForm, description: e.target.value })}
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400 resize-none"
+                  />
+                </label>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-slate-600">Vĩ độ (Lat) *</span>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      required
+                      value={poiForm.lat || ""}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setPoiForm({ ...poiForm, lat: v });
+                        if (newPoiPos) setNewPoiPos([v, newPoiPos[1]]);
+                      }}
+                      className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold text-slate-600">Kinh độ (Lng) *</span>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      required
+                      value={poiForm.lng || ""}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setPoiForm({ ...poiForm, lng: v });
+                        if (newPoiPos) setNewPoiPos([newPoiPos[0], v]);
+                      }}
+                      className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400"
+                    />
+                  </label>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
-                    Bán kính (mét)
-                  </label>
+                <label className="block">
+                  <span className="text-xs font-semibold text-slate-600">Phạm vi Range (mét)</span>
                   <input
                     type="number"
-                    min="0"
-                    step="1"
-                    value={selectedPoi.radius || 0}
-                    onChange={(e) =>
-                      setSelectedPoi({
-                        ...selectedPoi,
-                        radius: parseInt(e.target.value) || 0,
-                      })
-                    }
-                    className="w-full bg-white border border-slate-300 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500"
+                    min={0}
+                    value={poiForm.range_m ?? 0}
+                    onChange={(e) => setPoiForm({ ...poiForm, range_m: parseInt(e.target.value) || 0 })}
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400"
                   />
-                </div>
+                </label>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest mb-2">
-                    Hình ảnh (max 5MB)
-                  </label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handlePoiImageSelect}
+                  <span className="text-xs font-semibold text-slate-600">Ảnh (tối đa 5)</span>
+                  <div className="mt-1">
+                    <MultiImageUploader
+                      existingImages={poiForm.id ? (poiForm.images || []).filter((img) => !poiDeleteImageIds.includes(img.id)) : []}
+                      pendingFiles={poiNewImages}
+                      onAddFiles={(files) => setPoiNewImages((p) => [...p, ...files])}
+                      onDeleteExisting={(id) => setPoiDeleteImageIds((p) => [...p, id])}
+                      onRemovePending={(idx) => setPoiNewImages((p) => p.filter((_, i) => i !== idx))}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="submit"
                     disabled={operationLoading}
-                    className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-white text-slate-900 focus:outline-none focus:border-emerald-500 text-sm"
-                  />
-
-                  {(poiImagePreview ||
-                    (selectedPoi?.image && !removePoiImage)) && (
-                    <div className="mt-3 relative h-32 bg-slate-100 rounded-lg overflow-hidden border border-slate-200">
-                      <img
-                        src={
-                          poiImagePreview ||
-                          `/uploads/pois/${selectedPoi?.image}`
-                        }
-                        alt="Preview"
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = "none";
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPoiImageFile(null);
-                          setPoiImagePreview("");
-                          if (selectedPoi?.image && selectedPoi.id) {
-                            setRemovePoiImage(true);
-                          }
-                        }}
-                        className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-lg hover:bg-red-600 transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
+                    className="flex-1 bg-emerald-500 text-white py-2 rounded-xl text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                  >
+                    {operationLoading ? "Đang lưu..." : poiForm.id ? "Cập nhật" : "Tạo POI"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setIsEditingPoi(false); setNewPoiPos(null); setSelectedPoi(null); }}
+                    className="px-4 py-2 text-slate-600 bg-slate-100 rounded-xl text-sm hover:bg-slate-200 transition-colors"
+                  >
+                    Hủy
+                  </button>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
-                      Vĩ độ (Lat)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.000001"
-                      min="-90"
-                      max="90"
-                      value={selectedPoi.lat.toFixed(6)}
-                      onChange={(e) =>
-                        setSelectedPoi({
-                          ...selectedPoi,
-                          lat: parseFloat(e.target.value) || 0,
-                        })
-                      }
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-700 uppercase mb-1">
-                      Kinh độ (Lng)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.000001"
-                      min="-180"
-                      max="180"
-                      value={selectedPoi.lng.toFixed(6)}
-                      onChange={(e) =>
-                        setSelectedPoi({
-                          ...selectedPoi,
-                          lng: parseFloat(e.target.value) || 0,
-                        })
-                      }
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={operationLoading}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-700 disabled:text-slate-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/20"
-                >
-                  {operationLoading ? (
-                    <div className="flex items-center justify-center gap-2">
-                      <LoadingSpinner />
-                      Đang lưu...
-                    </div>
-                  ) : (
-                    "Lưu địa điểm"
-                  )}
-                </button>
               </form>
             </motion.div>
           )}
         </AnimatePresence>
 
-        <div className="absolute bottom-8 left-8 z-10 bg-white/80 backdrop-blur-md border border-slate-200 p-4 rounded-2xl shadow-xl">
-          <h5 className="text-[10px] font-bold text-slate-700 uppercase tracking-widest mb-3">
-            Chú thích
-          </h5>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-            {Object.entries(POI_ICONS).map(([type, icon]) => (
-              <div key={type} className="flex items-center gap-2">
-                <span className="text-sm">{icon}</span>
-                <span className="text-[10px] text-slate-600">{type}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        {/* ── Tour Form Modal ────────────────────────────────────────────────── */}
+        <AnimatePresence>
+          {showTourModal && (
+            <motion.div
+              key="tour-modal"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 z-[2000] flex items-center justify-center p-4"
+            >
+              <motion.div
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 20 }}
+                className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto"
+              >
+                <form onSubmit={handleSaveTour} className="p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-lg">
+                      {isEditingTour ? "Sửa Tour" : "Thêm Tour mới"}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => { setShowTourModal(false); setIsCreatingTour(false); setIsEditingTour(false); }}
+                      className="text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <label className="block">
+                    <span className="text-xs font-semibold text-slate-600">Tên Tour *</span>
+                    <input
+                      type="text"
+                      maxLength={255}
+                      required
+                      value={tourForm.name || ""}
+                      onChange={(e) => setTourForm({ ...tourForm, name: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-xs font-semibold text-slate-600">Mô tả</span>
+                    <textarea
+                      rows={2}
+                      value={tourForm.description || ""}
+                      onChange={(e) => setTourForm({ ...tourForm, description: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400 resize-none"
+                    />
+                  </label>
+
+                  <div>
+                    <span className="text-xs font-semibold text-slate-600">Ảnh (tối đa 5)</span>
+                    <div className="mt-1">
+                      <MultiImageUploader
+                        existingImages={
+                          isEditingTour
+                            ? (tours.find((t) => t.id === editingTourId)?.images || []).filter(
+                                (img) => !tourDeleteImageIds.includes(img.id)
+                              )
+                            : []
+                        }
+                        pendingFiles={tourNewImages}
+                        onAddFiles={(files) => setTourNewImages((p) => [...p, ...files])}
+                        onDeleteExisting={(id) => setTourDeleteImageIds((p) => [...p, id])}
+                        onRemovePending={(idx) => setTourNewImages((p) => p.filter((_, i) => i !== idx))}
+                      />
+                    </div>
+                  </div>
+
+                  {/* POI Picker */}
+                  <div>
+                    <span className="text-xs font-semibold text-slate-600">
+                      Chọn POIs * ({(tourForm.poi_ids || []).length} đã chọn)
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="🔍 Lọc POI..."
+                      value={tourPoiSearchText}
+                      onChange={(e) => setTourPoiSearchText(e.target.value)}
+                      className="mt-1 mb-2 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400"
+                    />
+                    <div className="max-h-40 overflow-y-auto space-y-1 border border-slate-100 rounded-xl p-2">
+                      {pois
+                        .filter((p) =>
+                          p.name.toLowerCase().includes(tourPoiSearchText.toLowerCase())
+                        )
+                        .map((poi) => {
+                          const pos = (tourForm.poi_ids || []).indexOf(poi.id!) + 1;
+                          const selected = pos > 0;
+                          return (
+                            <div
+                              key={poi.id}
+                              onClick={() => togglePoiInTour(poi.id!)}
+                              className={cn(
+                                "flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-sm transition-colors",
+                                selected
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "hover:bg-slate-50 text-slate-700"
+                              )}
+                            >
+                              {selected ? (
+                                <span className="w-5 h-5 bg-emerald-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
+                                  {pos}
+                                </span>
+                              ) : (
+                                <span className="w-5 h-5 border border-slate-300 rounded-full" />
+                              )}
+                              <span className="flex-1">{poi.name}</span>
+                              <span className="text-xs text-slate-400">
+                                {poi.lat.toFixed(4)}, {poi.lng.toFixed(4)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                    {/* Preview */}
+                    {(tourForm.poi_ids || []).length > 0 && (
+                      <div className="mt-2 text-xs text-slate-500">
+                        {(tourForm.poi_ids || [])
+                          .map((id, i) => `${i + 1}. ${pois.find((p) => p.id === id)?.name || "?"}`)
+                          .join(" → ")}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="submit"
+                      disabled={operationLoading}
+                      className="flex-1 bg-emerald-500 text-white py-2 rounded-xl text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                    >
+                      {operationLoading ? "Đang lưu..." : isEditingTour ? "Cập nhật" : "Tạo Tour"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowTourModal(false); setIsCreatingTour(false); setIsEditingTour(false); }}
+                      className="px-4 py-2 text-slate-600 bg-slate-100 rounded-xl text-sm hover:bg-slate-200 transition-colors"
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );

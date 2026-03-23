@@ -5,114 +5,98 @@ export const useTours = (token: string | null) => {
   const [tours, setTours] = useState<Tour[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const authHeaders = (): HeadersInit =>
+    token ? { Authorization: `Bearer ${token}` } : {};
+
   const fetchTours = useCallback(async () => {
     setLoading(true);
     try {
-      const headers: HeadersInit = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      const res = await fetch("/api/tours", { headers });
+      const res = await fetch("/api/admin/tours", { headers: authHeaders() });
       if (res.status === 401) {
-        localStorage.removeItem("authToken");
-        window.location.href = "/"; // Redirect to login
+        localStorage.removeItem("adminToken");
+        window.location.href = "/";
         throw new Error("Session hết hạn");
       }
-
       if (!res.ok) throw new Error("Lỗi tải Tours");
-
-      // if (!res.ok) throw new Error("Lỗi tải Tours");
       const data = await res.json();
       setTours(data);
-    } catch (error) {
-      console.error(error);
-      throw error;
+    } catch (err) {
+      console.error(err);
+      throw err;
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ✅ PHASE 2 C6: saveTour now accepts imageFile parameter for multipart
+  /**
+   * saveTour — create or update a Tour.
+   * @param tour            Partial Tour (id present → PUT)
+   * @param newImageFiles   New images to upload
+   * @param deleteImageIds  IDs of tour_images to delete on PUT
+   */
   const saveTour = useCallback(
-    async (tour: Partial<Tour>, imageFile?: File, removeImage?: boolean) => {
-      const method = tour.id ? "PUT" : "POST";
-      const url = tour.id ? `/api/tours/${tour.id}` : "/api/tours";
+    async (
+      tour: Partial<Tour>,
+      newImageFiles?: File[],
+      deleteImageIds?: number[]
+    ) => {
+      const isEdit = !!tour.id;
+      const method = isEdit ? "PUT" : "POST";
+      const url = isEdit ? `/api/admin/tours/${tour.id}` : "/api/admin/tours";
 
-      let headers: HeadersInit = {};
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      // ✅ FIX: ALWAYS use FormData for POST/PUT tours (multipart/form-data required by backend)
-      // Do NOT set Content-Type header - let browser auto-generate with boundary
       const formData = new FormData();
-      formData.append("title", tour.title || "");
-
-      // Append description if present
-      if (tour.description) {
-        formData.append("description", tour.description);
+      formData.append("name", tour.name || "");
+      if (tour.description !== undefined) {
+        formData.append("description", tour.description || "");
       }
-
-      // Append poi_ids as JSON string
       formData.append("poi_ids", JSON.stringify(tour.poi_ids || []));
 
-      // Append image file if uploading new image
-      if (imageFile) {
-        formData.append("image", imageFile);
+      if (isEdit && deleteImageIds?.length) {
+        deleteImageIds.forEach((id) =>
+          formData.append("delete_image_ids", String(id))
+        );
       }
 
-      // Append flag to remove image from server
-      if (removeImage) {
-        formData.append("remove_image", "true");
-      }
+      const imageField = isEdit ? "new_images" : "images";
+      (newImageFiles || []).forEach((f) => formData.append(imageField, f));
 
       const res = await fetch(url, {
         method,
-        headers,
+        headers: authHeaders(),
         body: formData,
-        // IMPORTANT: Do NOT set Content-Type header here
-        // Browser will automatically set Content-Type: multipart/form-data with correct boundary
       });
 
-      if (!res.ok) throw new Error("Lỗi lưu Tour");
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Lỗi lưu Tour");
+      }
 
-      // ✅ FIX: Refresh tours list, nhưng không throw error nếu fetchTours fail
-      // POST/PUT đã thành công, không nên block save dù fetch fail
       try {
         await fetchTours();
-      } catch (error) {
-        console.warn(
-          "Cảnh báo: Không thể tải lại danh sách tour, vui lòng refresh",
-          error,
-        );
-        // Không throw error - POST/PUT đã thành công, tour đã insert/update vào DB
+      } catch (e) {
+        console.warn("Không thể reload danh sách Tour:", e);
       }
     },
-    [token, fetchTours],
+    [token, fetchTours] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const deleteTour = useCallback(
     async (id: number) => {
-      const headers: HeadersInit = {};
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      const res = await fetch(`/api/tours/${id}`, {
+      const res = await fetch(`/api/admin/tours/${id}`, {
         method: "DELETE",
-        headers,
+        headers: authHeaders(),
       });
-
-      if (!res.ok) throw new Error("Lỗi xóa Tour");
-
-      // ✅ FIX: Refresh tour list, nhưng không throw error nếu fetchTours fail
-      // DELETE đã thành công, không nên block delete dù fetch fail
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Lỗi xóa Tour");
+      }
       try {
         await fetchTours();
-      } catch (error) {
-        console.warn(
-          "Cảnh báo: Không thể tải lại danh sách tour, vui lòng refresh",
-          error,
-        );
-        // Không throw error - DELETE đã thành công, tour đã xóa khỏi DB
+      } catch (e) {
+        console.warn("Không thể reload danh sách Tour:", e);
       }
     },
-    [token, fetchTours],
+    [token, fetchTours] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   return { tours, setTours, loading, fetchTours, saveTour, deleteTour };
