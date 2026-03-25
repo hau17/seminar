@@ -1,7 +1,7 @@
 // ✅ v1.7 Business Auth Page
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useBusinessAuth } from "../context/BusinessAuthContext";
+import { useBusinessAuth } from "../../context/BusinessAuthContext";
 
 export function BusinessAuth() {
   const navigate = useNavigate();

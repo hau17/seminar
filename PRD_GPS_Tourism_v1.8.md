@@ -163,9 +163,8 @@ scripts/
 | --------- | -------------------------------- | ----------------- |
 | Ảnh POI   | `poi_{id}_{uuid}.{ext}`          | `poi_5_a3f2.jpg`  |
 | Ảnh Tour  | `tour_{id}_{uuid}.{ext}`         | `tour_2_b1c9.jpg` |
-| Audio POI | `poi_{id}_{lang}_v{version}.mp3` | `poi_5_vi_v0.mp3` |
-
-**Version audio:** Mỗi lần POI bị sửa, tất cả audio cũ bị xóa và version reset về `0`. File mới tiếng Việt được tạo là `poi_{id}_vi_v0.mp3`. Các ngôn ngữ khác sau này sẽ cũng bắt đầu từ `v0` của lần sửa mới nhất.
+| Audio POI | `poi_{id}_{lang}_v{version}.mp3` | `poi_5_vi_v1.mp3` |
+**Version audio (Versioning Logic):** Khi tạo POI mới, `version` khởi tạo mặc định là `0` (`v0`). Mỗi lần Admin hoặc Doanh nghiệp nhấp vào Cập nhật nội dung POI, tất cả audio cũ và bản dịch cũ phải bị xóa khỏi máy chủ, đồng thời **giá trị version bắt buộc phải tăng thêm 1 đơn vị (increment +1)** để đảm bảo phá vỡ bộ nhớ đệm (Cache Invalidation) trên thiết bị của User. Ví dụ: File tiếng Việt được tạo tiếp theo sẽ mang tên `poi_5_vi_v1.mp3`, quá trình sửa lần sau đó sẽ lên `v2`, `v3`... Bất kỳ phiên bản ngôn ngữ nào khác (được sinh ngầm On-demand) cũng sẽ đồng bộ chuẩn theo `version` mới nhất này.
 
 ---
 
@@ -318,24 +317,20 @@ Khi Admin click vào vùng trống trên bản đồ (không phải chấm POI):
 #### 5.4.5 Form Sửa POI (Admin POI)
 
 Admin chỉ được sửa POI do Admin tạo (`owner_type = 'admin'`).
-
 **Fields có thể sửa:**
-
 - Tên POI
 - Mô tả
 - Kinh độ, Vĩ độ
 - Phạm vi (Range)
 - Ảnh: hiển thị 5 ảnh hiện tại (mỗi ảnh có nút ❌ xóa riêng), có thể upload thêm (tổng ≤ 5)
-
 **Sau khi submit:**
-
-1. `PUT /api/admin/pois/:id` — cập nhật POI trong DB
-2. Xử lý ảnh (xóa ảnh bị xóa, upload ảnh mới)
+1. `PUT /api/admin/pois/:id` — cập nhật POI trong DB (Backend tự động tính toán `new_version = old_version + 1`).
+2. Xử lý ảnh (xóa ảnh bị xóa, upload ảnh mới).
 3. **Xóa toàn bộ file audio cũ** của POI này (mọi ngôn ngữ, mọi version): `DELETE /uploads/audio/poi_{id}_*.mp3`
-4. **Xóa records trong `poi_audio_files`** theo `poi_id`
-5. **Xóa records trong `poi_translations`** theo `poi_id` (bản dịch cũ không còn phù hợp với mô tả mới)
-6. Gọi Python TTS tạo lại audio tiếng Việt: `poi_{id}_vi_v0.mp3`
-7. Lưu record audio mới vào `poi_audio_files`
+4. **Xóa records trong bảng `poi_audio_files`** (theo `poi_id`).
+5. **Xóa records trong bảng `poi_translations`** (bản dịch cũ không còn đúng chuẩn với mô tả mới).
+6. Gọi Python TTS tạo lại audio tiếng Việt lập tức với version gia tăng: `poi_{id}_vi_v{new_version}.mp3`.
+7. Lưu record audio mới vào bảng `poi_audio_files` tại cột phiên bản version = `new_version`.
 
 #### 5.4.6 Xóa POI
 
@@ -562,9 +557,12 @@ Click "+ Thêm POI" → Form thêm POI:
 
 #### 6.4.2 Sửa POI (Business)
 
-Giống Admin, sửa được: Tên, Mô tả, Kinh độ, Vĩ độ, Range, Ảnh (xóa/thêm ≤ 5).
-
-**Sau khi submit:** Giống Admin (xóa audio cũ, tạo lại audio VI v0, xóa bản dịch cũ).
+Giống quy luật của Admin, cửa sổ sửa POI cho Doanh nghiệp cho sửa: Tên, Mô tả, Kinh độ, Vĩ độ, Range, Ảnh (xóa đi/thêm vào ≤ 5).
+**Sau khi submit (Trigger logic như Admin):** 
+1. `PUT /api/business/pois/:id`. Server định danh `new_version = old_version + 1`.
+2. Hủy bỏ triệt để file audio cũ của mọi ngôn ngữ và các bản dịch đang nằm trên DB/Server.
+3. Sinh lại audio Tiếng Việt dưới định dạng tên file gia tăng tiến trình: `poi_{id}_vi_v{new_version}.mp3`
+4. Cập nhật record phiên bản vào `poi_audio_files` làm tham chiếu cho App thiết bị.
 
 #### 6.4.3 Xóa POI (Business)
 
@@ -803,16 +801,29 @@ POI A (id nhỏ hơn) không được phát trong suốt thời gian user ở tr
 
 ### 8.3 Xử lý dung lượng thiết bị
 
-**Khi pre-load audio (user cách range 30m):**
+### 8.3 Xử lý dung lượng thiết bị và Quản lý Cache (Versioning)
 
-1. Kiểm tra dung lượng trống: Nếu < 50MB → bỏ qua download
-2. Download file về cache local
+**Khi tải dữ liệu POI từ Server:**
+Các API như `/api/pois/:id` hoặc `/api/user/pois/nearby` luôn trả về kèm trường `version` mới nhất của file audio tương ứng với ngôn ngữ mà User đang sử dụng.
 
-**Khi phát (user vào phạm vi 3m):**
+**Logic đối chiếu Version tại App:**
+Trước khi quyết định hiển thị nút thao tác ("Nghe trực tuyến", "Tải xuống") hoặc tự động phát audio, App **bắt buộc** phải kiểm tra:
+1. **Kiểm tra tồn tại:** Trong local cache (bộ nhớ tạm của thiết bị) đã có file `poi_{id}_{lang}_v{local_version}.mp3` chưa?
+2. **So sánh Version Cache:**
+   - Nếu `local_version` < `server_version` (có nghĩa là Admin hoặc Doanh nghiệp đã tiến hành sửa đổi/cập nhật mô tả POI này):
+     - Hệ thống App phải **xóa bỏ** file âm thanh cũ tồn đọng ở local cache ngay lập tức.
+     - Cập nhật lại giao diện về trạng thái "Chưa tải", kích hoạt hiển thị lại nút "Tải xuống" để User chủ động lấy bản cập nhật mới (hoặc quá trình này sẽ tự động tải ngầm nếu User tiến vào phạm vi Pre-load).
+   - Nếu `local_version` == `server_version`: Xác nhận bản audio khả dụng là bản mới nhất. Tiếp tục giữ nguyên file trong cache để sử dụng ở chế độ Offline.
 
-- Nếu file đã được download: phát từ local cache
-- Nếu file chưa được download (thiếu dung lượng): phát stream từ server URL `/api/audio/stream/poi_{id}_{lang}_v{version}.mp3`
-- Nếu không có internet: không phát, hiển thị icon (🔇) trên POI indicator
+**Khi pre-load audio (User cách range 30m):**
+1. Kiểm tra dung lượng khả dụng của thiết bị: Nếu bộ nhớ trống < 50MB → Dừng tải và bỏ qua pre-load.
+2. Nếu đủ dung lượng và cần lấy bản mới (chưa có file tại local cache hoặc phát hiện version bị cũ): Tiến hành Download file audio chuẩn từ Server về lưu tại local cache của App.
+
+**Khi bắt đầu phát Audio (User đi vào phạm vi 3m):**
+- Nếu bản Audio có `version` đối chiếu khớp đã tồn tại trong local cache: Load và phát trực tiếp từ máy thiết bị (Hỗ trợ Offline).
+- Nếu chưa có sẵn trong local (có thể do lỗi mạng chưa tải xong phần pre-load hoặc do thiếu dung lượng < 50MB): Chuyển sang chế độ Stream, phát trực tiếp thông qua đường dẫn URL `/api/audio/stream/poi_{id}_{lang}_v{server_version}.mp3`.
+- Nếu hoàn toàn mất kết nối Internet & File chưa có cache: Ngưng phát tiến trình audio, hiển thị icon báo lỗi (🔇) trên bộ hiển thị POI Indicator.
+
 
 ### 8.4 Luồng tạo Audio (Backend)
 
@@ -821,18 +832,18 @@ POI A (id nhỏ hơn) không được phát trong suốt thời gian user ở tr
 ```
 1. Lưu POI vào DB → lấy id mới
 2. Spawn Python: python scripts/tts.py --text "{mô tả tiếng Việt}" --lang vi ...
-3. Sau khi Python hoàn thành:
-   INSERT INTO poi_audio_files (poi_id, language_code, version, file_path)
-   VALUES ({id}, 'vi', 0, '/uploads/audio/poi_{id}_vi_v0.mp3')
+3. Sau  khi Python hoàn thành: INSERT INTO poi_audio_files (poi_id, language_code, version, file_path) VALUES ({id}, 'vi', 0, '/uploads/audio/poi_{id}_vi_v0.mp3')
+
 ```
 
 **Khi Admin/Business sửa POI:**
 
 ```
-1. Cập nhật POI trong DB
-2. Xóa từng file vật lý âm thanh và bản dịch.
-3. Spawn Python TTS → tạo poi_{id}_vi_v0.mp3 (version reset về 0)
-4. INSERT record mới vào poi_audio_files
+Server truy vấn version cao nhất đang có của POI này. Tính toán new_version = current_version + 1.
+Cập nhật thông tin data POI cơ bản vào DB.
+Xóa sổ từng file vật lý âm thanh và tiến hành xóa toàn bộ lưu trữ của bảng bản dịch poi_translations.
+Spawn Python TTS → tạo định dạng file mới poi_{id}_vi_v{new_version}.mp3 (với tham số version bắt buộc gia tăng +1).
+INSERT record mới vào poi_audio_files (lưu chính xác giá trị new_version).
 ```
 
 **Khi Admin/Business MỞ XEM CHI TIẾT POI và ĐỔI NGÔN NGỮ, hoặc User bấm "Tạo Audio":**
@@ -907,7 +918,7 @@ if __name__ == "__main__":
 | BR-01 | POI không thể xóa nếu đang nằm trong ít nhất 1 Tour (Admin hoặc User). Áp dụng cho cả Admin và Doanh nghiệp.                                      |
 | BR-02 | Mô tả POI là bắt buộc (không được để trống) vì dùng để tạo audio TTS.                                                                             |
 | BR-03 | Khi thêm mới POI → ngay lập tức tạo audio tiếng Việt (`vi_v0`).                                                                                   |
-| BR-04 | Khi sửa POI → xóa toàn bộ file audio (mọi ngôn ngữ, mọi version) + xóa toàn bộ bản dịch → tạo lại audio tiếng Việt (`vi_v0`). Version reset về 0. |
+| BR-04 | **Version Audio (Cache Invalidation):** Khi nội dung của một POI bị thay đổi, hệ thống **bắt buộc phải tăng (increment +1)** tham số `version` thay vì tự động reset về `0`. Server sẽ tiến hành xóa file audio cũ đi kèm toàn bộ bản dịch trước đó. Quá trình này sẽ kích hoạt việc tạo lại tự động file audio mô tả Tiếng Việt mới (từ `poi_5_vi_v0.mp3` tăng tuần tự lên `poi_5_vi_v1.mp3`, `poi_5_vi_v2.mp3`...). Các App (User Device) dùng chỉ số `version` trả về này để làm cơ sở tự động xóa bỏ cache file cũ và ép tải bản audio mới. |
 | BR-05 | Khi xóa POI → xóa toàn bộ file audio + bản dịch + ảnh liên quan.                                                                                  |
 | BR-06 | Admin không thể sửa POI của Doanh nghiệp. Chỉ có thể xem và xóa (khi POI không trong tour).                                                       |
 | BR-07 | Doanh nghiệp không thể xóa POI của doanh nghiệp khác, không nhìn thấy POI của doanh nghiệp khác.                                                  |
@@ -1096,128 +1107,286 @@ INSERT OR IGNORE INTO languages VALUES ('ko', '한국어', 'ko-KR-SunHiNeural', 
 
 ## 11. API Specifications
 
-> **Quy ước:**
->
-> - Admin routes: Header `Authorization: Bearer <admin_token>`
-> - Business routes: Header `Authorization: Bearer <business_token>`
-> - User routes: Header `Authorization: Bearer <user_token>`
-> - File upload: `Content-Type: multipart/form-data`
-> - Các request khác: `Content-Type: application/json`
-
+> **Quy ước chung hệ thống:**
+> - Tất cả API của Admin ưu tiên cung cấp Header: `Authorization: Bearer <admin_token>`
+> - Tất cả API của Business cung cấp Header: `Authorization: Bearer <business_token>`
+> - Tất cả API của User cung cấp Header: `Authorization: Bearer <user_token>`
+> - API có upload ảnh gửi bằng format: `Content-Type: multipart/form-data`
+> - Các POST/PUT thông thường gửi bằng format: `Content-Type: application/json`
 ---
-
 ### 11.1 Authentication
-
-```
+```text
 POST /api/auth/admin/login
+  Method: POST
+  Content-Type: application/json
   Body: { email: string, password: string }
-  200: { token: string, admin: { id, name, email } }
+  200: { token: string, admin: { id: number, name: string, email: string } }
   401: { error: "Email hoặc mật khẩu không đúng" }
-
 POST /api/auth/business/register
+  Method: POST
+  Content-Type: application/json
   Body: { name: string, email: string, password: string, confirm_password: string }
   201: { message: "Đăng ký thành công" }
   400: { error: "Email đã được sử dụng" }
   400: { error: "Mật khẩu xác nhận không khớp" }
-  400: { error: "Validation error", fields: { field: "message" } }
-
+  400: { error: "Validation error", fields: { [field_name]: "message" } }
 POST /api/auth/business/login
+  Method: POST
+  Content-Type: application/json
   Body: { email: string, password: string }
-  200: { token: string, business: { id, name, email } }
+  200: { token: string, business: { id: number, name: string, email: string } }
   401: { error: "Email hoặc mật khẩu không đúng" }
-
 POST /api/auth/user/register
+  Method: POST
+  Content-Type: application/json
   Body: { name: string, email: string, password: string, confirm_password: string }
   201: { message: "Đăng ký thành công. Vui lòng đăng nhập." }
-  400: { error: "...", fields: { ... } }
-
+  400: { error: "Tham số đầu vào không hợp lệ", fields: { [field_name]: "message" } }
 POST /api/auth/user/login
+  Method: POST
+  Content-Type: application/json
   Body: { email: string, password: string, language_code: string }
-  200: { token: string, user: { id, name, email, language_code } }
+  200: { token: string, user: { id: number, name: string, email: string, language_code: string } }
   401: { error: "Email hoặc mật khẩu không đúng" }
-  -- Side effect: Trigger background translation job cho POI/Tour trong 20km
-```
+  -- Side effect: Trigger background job ngầm để dịch toàn bộ POI/Tour nằm trong bán kính 20km của User (nếu cần thiết).
 
 ---
-
+```
 ### 11.2 Admin — POI
 
-```
 GET /api/admin/pois
-  ... [Giữ nguyên như v1.6 API]
+  Method: GET
+  Header: Authorization: Bearer <admin_token>
+  Query: ?search=<text> (Chấp nhận chuỗi tiếng Việt có dấu/không dấu, không phân biệt hoa thường)
+  200: [{ 
+         id: number, name: string, description: string, lat: number, lng: number, range_m: number, 
+         owner_type: string, owner_id: number,
+         images: [{ id: number, file_path: string }],
+         audio_files: [{ language_code: string, version: number, file_path: string }],
+         translations: [{ language_code: string, translated_description: string }] 
+       }]
 
 POST /api/admin/pois
-  ... [Giữ nguyên như v1.6 API]
+  Method: POST
+  Header: Authorization: Bearer <admin_token>
+  Content-Type: multipart/form-data
+  Body: 
+    - name: string (bắt buộc)
+    - description: text (bắt buộc)
+    - lat: number (bắt buộc)
+    - lng: number (bắt buộc)
+    - range_m: number (tùy chọn, default 0)
+    - images[]: file array (tối đa 5 file, mỗi file <= 5MB)
+  201: { id: number, name: string, description: string, lat: number, lng: number, range_m: number }
+  400: { error: "Dữ liệu không hợp lệ", fields: { ... } }
+  -- Side effect: Khởi tạo giá trị audio version = 0. Spawn tiến trình Python TTS tạo Audio tiếng Việt ngay lập tức.
 
 PUT /api/admin/pois/:id
-  ... [Giữ nguyên như v1.6 API]
+  Method: PUT
+  Header: Authorization: Bearer <admin_token>
+  Content-Type: multipart/form-data
+  Body: 
+    - name, description, lat, lng, range_m (tùy chọn cập nhật)
+    - new_images[] (tùy chọn thêm ảnh)
+    - delete_image_ids[] (tùy chọn xóa các id ảnh cũ)
+  200: { 
+         success: boolean, 
+         audio_version: number  // BẮT BUỘC trả về version mới nhất sau khi tăng (vd: 1, 2, 3...)
+       }
+  404: { error: "POI không tồn tại" }
+  403: { error: "Không có quyền sửa POI này" }
+  -- Side effect TỐI QUAN TRỌNG: 
+     1) Tính toán: new_version = old_version + 1. Tính toán logic version vào DB.
+     2) Quét và xóa SẠCH toàn bộ file âm thanh (mp3) của MỌI ngôn ngữ hiện đang lưu và các record bản dịch của POI này.
+     3) Sinh lập tức audio Tiếng Việt (bản gốc) theo hệ version mới (`poi_{id}_vi_v{new_version}.mp3`).
 
 DELETE /api/admin/pois/:id
-  ... [Giữ nguyên như v1.6 API]
-```
+  Method: DELETE
+  Header: Authorization: Bearer <admin_token>
+  200: { success: true }
+  404: { error: "POI không tồn tại" }
+  409: { error: "Không thể xóa POI đang nằm trong Tour", tours: [{ id: number, name: string }] }
+  -- Side effect: Hủy bỏ data POI + Xóa sạch các records Audio/Images/Translations và file vật lý liên quan.
 
 ### 11.3 Admin — Tour
 
-```
 GET /api/admin/tours
-  ... [Giữ nguyên]
+  Method: GET
+  Header: Authorization: Bearer <admin_token>
+  Query: ?search=<text> (Chuỗi tiếng Việt có dấu/không dấu)
+  200: [{ 
+         id: number, name: string, description: string, created_by_type: string, created_by_id: number,
+         images: [{ id: number, file_path: string }],
+         pois: [{ position: number, poi_id: number, name: string, lat: number, lng: number }] 
+       }]
 
 POST /api/admin/tours
-  ... [Giữ nguyên]
+  Method: POST
+  Header: Authorization: Bearer <admin_token>
+  Content-Type: multipart/form-data
+  Body: 
+    - name: string
+    - description: text
+    - images[]: file array (tối đa 5)
+    - poi_ids: chuỗi JSON string mảng ID theo thứ tự (VD: "[5, 12, 1]")
+  201: { id: number, name: string, ... }
+  400: { error: "Thiếu dữ liệu bắt buộc" }
 
 PUT /api/admin/tours/:id
-  ... [Giữ nguyên]
+  Method: PUT
+  Header: Authorization: Bearer <admin_token>
+  Content-Type: multipart/form-data
+  Body: { name?, description?, new_images[], delete_image_ids[], poi_ids? }
+  200: { success: true }
+  404: { error: "Tour không tồn tại" }
 
 DELETE /api/admin/tours/:id
-  ... [Giữ nguyên]
-```
+  Method: DELETE
+  Header: Authorization: Bearer <admin_token>
+  200: { success: true }
+  404: { error: "Tour không tồn tại" }
+  -- Side effect: Loại bỏ record Tour khỏi hệ thống, KHÔNG xóa các tham chiếu POI gốc.
 
 ### 11.4 Admin — Doanh nghiệp
 
 ```
 GET /api/admin/businesses
-  ... [Giữ nguyên]
+  Method: GET
+  Header: Authorization: Bearer <admin_token>
+  Query: ?search=<text>
+  200: [{ id: number, name: string, email: string, created_at: string, poi_count: number }]
+
 GET /api/admin/businesses/:id
-  ... [Giữ nguyên]
+  Method: GET
+  Header: Authorization: Bearer <admin_token>
+  200: { 
+         id: number, name: string, email: string, created_at: string,
+         pois: [{ id, name, lat, lng, images: [...], audio_files: [...], translations: [...] }] 
+       }
+
 DELETE /api/admin/pois/business/:poi_id
-  ... [Giữ nguyên]
+  Method: DELETE
+  Header: Authorization: Bearer <admin_token>
+  200: { success: true }
+  409: { error: "Không thể xóa POI đang trong Tour", tours: [...] }
+  -- Ghi chú: Sử dụng khi Admin cần dọn dẹp POI lỗi của doanh nghiệp.
 ```
 
 ### 11.5 Admin — Dashboard
 
-```
 GET /api/admin/dashboard/stats
-  ... [Giữ nguyên]
-```
+  Method: GET
+  Header: Authorization: Bearer <admin_token>
+  200: {
+    total_users: number,
+    total_businesses: number,
+    total_pois: number,
+    pois_by_admin: number,
+    pois_by_business: number,
+    total_tours: number,
+    tours_by_admin: number,
+    tours_by_user: number
+  }
+  -- online_users được lấy từ Firebase Realtime DB phía client, không qua API này
+
+
 
 ### 11.6 Business — POI
 
 ```
 GET /api/business/pois
-  ... [Giữ nguyên]
+  Method: GET
+  Header: Authorization: Bearer <business_token>
+  Query: ?search=<text> 
+  200: [{ 
+         id: number, name: string, description: string, lat: number, lng: number, range_m: number,
+         images: [...], audio_files: [...], translations: [...] 
+       }]
+  -- Ghi chú: Chỉ lọc/trả về đúng các POI thuộc về Business đang gửi Request.
+
 POST /api/business/pois
-  ... [Giữ nguyên]
+  Method: POST
+  Header: Authorization: Bearer <business_token>
+  Content-Type: multipart/form-data
+  Body: { name, description, lat, lng, range_m?, images[] }
+  201: { id: number, name: string, ... }
+  -- Side effect: Chạy init version = 0, khởi tạo Audio Tiếng Việt.
+
 PUT /api/business/pois/:id
-  ... [Giữ nguyên]
+  Method: PUT
+  Header: Authorization: Bearer <business_token>
+  Content-Type: multipart/form-data
+  Body: { name?, description?, lat?, lng?, range_m?, new_images[], delete_image_ids[] }
+  200: { 
+         success: true, 
+         audio_version: number  // BẮT BUỘC nhận version tăng tiến (+1) cho App tải lệnh xóa Cache.
+       }
+  403: { error: "Không có quyền sửa POI này" }
+  -- Side effect: Tương tự như Admin (Calculated new_version = old_version + 1, Hủy bộ file âm thanh/phiên dịch cũ, tạo lại audio Tiếng Việt của version mới).
+
 DELETE /api/business/pois/:id
-  ... [Giữ nguyên]
+  Method: DELETE
+  Header: Authorization: Bearer <business_token>
+  200: { success: true }
+  403: { error: "Không có quyền xóa POI này" }
+  409: { error: "Không thể xóa POI đang nằm trong Tour", tours: [...] }
 ```
 
 ### 11.7 User — POI & Tour
 
 ```
 GET /api/user/pois/nearby
-  ... [Giữ nguyên]
+  Method: GET
+  Header: Authorization: Bearer <user_token>
+  Query: 
+    - lat: number
+    - lng: number
+    - radius: number (bán kính theo mét, default 20000)
+    - search: string (tùy chọn, chuỗi không dấu/có dấu)
+  200: [{ 
+         id: number, name: string, description_localized: string, lat: number, lng: number, range_m: number,
+         images: [...], audio_version: number, distance_m: number 
+       }]
+  -- Ghi chú: 
+     - Trả về `audio_version` mới nhất từ Database theo ngôn ngữ của hệ thống để App kiểm tra Cache.
+     - `description_localized`: Tự động map từ POI_Translations (nếu đã có bản dịch), ngược lại fallback về chuỗi rỗng để chọc trigger dịch thủ công.
+
 GET /api/user/tours/nearby
-  ... [Giữ nguyên]
+  Method: GET
+  Header: Authorization: Bearer <user_token>
+  Query: ?lat=<number>&lng=<number>&radius=20000&search=<text>
+  200: [{ 
+         id: number, name: string, description_localized: string, images: [...],
+         pois: [{ position: number, poi_id: number, name_localized: string, lat: number, lng: number }] 
+       }]
+  -- Ghi chú: Hiển thị các Public Tours (tạo bởi Admin).
+
 GET /api/user/tours/mine
-  ... [Giữ nguyên]
+  Method: GET
+  Header: Authorization: Bearer <user_token>
+  200: [{ id: number, name: string, pois: [{ position, poi_id, name, lat, lng }] }]
+  -- Ghi chú: Danh sách Tour thiết kế cá nhân (Private) của User.
+
 POST /api/user/tours
-  ... [Giữ nguyên]
+  Method: POST
+  Header: Authorization: Bearer <user_token>
+  Content-Type: application/json
+  Body: { name: string, poi_ids: [mảng ID của các POI có thứ tự] }
+  201: { id: number, name: string }
+
 PUT /api/user/tours/:id
-  ... [Giữ nguyên]
+  Method: PUT
+  Header: Authorization: Bearer <user_token>
+  Content-Type: application/json
+  Body: { name: string?, poi_ids: number[]? }
+  200: { success: true }
+  403: { error: "Không có quyền sửa tour này" }
+
 DELETE /api/user/tours/:id
-  ... [Giữ nguyên]
+  Method: DELETE
+  Header: Authorization: Bearer <user_token>
+  200: { success: true }
+  403: { error: "Không có quyền xóa tour này" }
 ```
 
 ---
@@ -1226,29 +1395,47 @@ DELETE /api/user/tours/:id
 
 ```
 GET /api/audio/stream/:filename
-  -- Stream file audio trực tiếp từ server (dùng khi thiết bị hết dung lượng)
-  -- Filename format: poi_{id}_{lang}_v{version}.mp3
-  Auth: user_token
-  200: Audio stream (Content-Type: audio/mpeg)
-  404: { error: "File không tồn tại" }
+  Method: GET
+  Header: Authorization: Bearer <user_token>
+  Tham số filename: `poi_{id}_{lang}_v{version}.mp3`
+  200: Audio binary stream chunked (Header -> Content-Type: audio/mpeg)
+  404: { error: "File audio chưa được khởi tạo trên server" }
+  -- Chức năng: Bypass tải nguyên luồng, cho phép App User nghe trực tiếp theo giao thức Stream nếu user không dư dả dung lượng máy.
 
 POST /api/audio/generate
-  -- API xử lý On-demand (User bấm Tạo, Admin/Business chọn dropdown)
-  Auth: user_token | admin_token | business_token
-  Body: { poi_id: number, language_code: string }
-  200: { file_path: string, already_existed: boolean }
-  -- Nếu đang dịch/tạo TTS: Hàm này sẽ chờ và trả về kết quả khi xong.
+  Method: POST
+  Header: Authorization: Bearer <user_token> | Bearer <admin_token> | Bearer <business_token>
+  Content-Type: application/json
+  Body: { 
+          poi_id: number, 
+          language_code: string 
+        }
+  200: { 
+         success: boolean, 
+         already_existed: boolean,  // True nếu bản dịch/audio version này đã có sẵn trong máy chủ.
+         file_path: string,         // Đường dẫn URL để tải / stream file mp3.
+         audio_version: number      // Phiên bản version mới nhất để Update Cache.
+       }
+  404: { error: "Không tìm thấy POI ID" }
+  -- Side effect: 
+     - Xử lý ĐỒNG BỘ quá trình Sinh On-demand. 
+     - Step 1: Query Database, nếu bản dịch `language_code` chưa có -> Chạy `translate.py`.
+     - Step 2: Query File System, nếu tham chiếu `poi_{id}_{lang}_v{version}.mp3` chưa tồn tại -> Chạy `tts.py` theo Text đã dịch. Hành vi ngâm API Request này tới chừng nào sinh xong file vật lý mới quăng Response về cho App.
 
 POST /api/translate/batch
-  -- Dịch hàng loạt POI/Tour khi user đăng nhập
-  Auth: user_token
+  Method: POST
+  Header: Authorization: Bearer <user_token>
+  Content-Type: application/json
   Body: {
     language_code: string,
-    poi_ids: number[],
-    tour_ids: number[]
+    poi_ids: number[],       // Danh sách ID các POI cần quét
+    tour_ids: number[]       // Danh sách ID các Tour cần quét
   }
-  200: { translated_count: number }
-  -- Với mỗi POI/Tour: chỉ dịch nếu chưa tồn tại bản dịch ngôn ngữ đó
+  200: { 
+         success: boolean, 
+         translated_count: number  // Số nội dung thực tế vừa được chạy qua Deep-Translator
+       }
+  -- Trình kích hoạt này thường đặt ngay tại lúc User Logon hoặc bật ứng dụng lên, giúp background app càn lướt các POI trong bán kính 20km và tự động tạo mô tả đa ngôn ngữ lưu Database trươc khi User truy cập.
 ```
 
 ---

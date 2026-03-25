@@ -1,9 +1,11 @@
 // Business Dashboard — v1.6 schema aligned
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useBusinessAuth } from "../context/BusinessAuthContext";
-import type { POI } from "../types";
-import { BusinessPoiPanel } from "../components/BusinessPoiPanel";
+import { useBusinessAuth } from "../../context/BusinessAuthContext";
+import type { POI } from "../../types";
+import { BusinessPoiPanel } from "./BusinessPoiPanel";
+import { POIDetailModal } from "../poi/POIDetailModal";
+import { AnimatePresence } from "motion/react";
 
 export function BusinessDashboard() {
   const navigate = useNavigate();
@@ -13,6 +15,7 @@ export function BusinessDashboard() {
   const [error, setError] = useState("");
   const [showPanel, setShowPanel] = useState(false);
   const [editingPoi, setEditingPoi] = useState<(POI & { id: number }) | null>(null);
+  const [viewingPoi, setViewingPoi] = useState<POI | null>(null);
 
   const token = auth?.token ?? null;
 
@@ -106,6 +109,22 @@ export function BusinessDashboard() {
           />
         )}
 
+        {/* Cửa sổ xem chi tiết POI (Đa ngôn ngữ & Sinh audio) */}
+        <AnimatePresence>
+          {viewingPoi && (
+            <POIDetailModal
+              poi={viewingPoi}
+              token={token}
+              onClose={() => setViewingPoi(null)}
+              onEdit={() => {
+                setViewingPoi(null);
+                setEditingPoi(viewingPoi as POI & { id: number });
+                setShowPanel(true);
+              }}
+            />
+          )}
+        </AnimatePresence>
+
         {pois.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-lg">
             <p className="text-gray-600 mb-4">Chưa có điểm du lịch nào</p>
@@ -142,6 +161,12 @@ export function BusinessDashboard() {
                     {poi.range_m ? ` · ${poi.range_m}m` : ""}
                   </p>
                   <div className="flex gap-2">
+                    <button
+                      onClick={() => setViewingPoi(poi)}
+                      className="flex-1 px-3 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded text-sm font-medium transition"
+                    >
+                      Xem
+                    </button>
                     <button
                       onClick={() => { setEditingPoi(poi as POI & { id: number }); setShowPanel(true); }}
                       className="flex-1 px-3 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded text-sm font-medium transition"

@@ -2,7 +2,7 @@
 // Uses <Navigate replace> pattern to avoid infinite redirect loops
 import { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { useBusinessAuth } from "../context/BusinessAuthContext";
+import { useBusinessAuth } from "../../context/BusinessAuthContext";
 
 interface BusinessAuthGuardProps {
   children: ReactNode;

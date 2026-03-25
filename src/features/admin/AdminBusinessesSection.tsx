@@ -9,8 +9,8 @@ import {
   Image as ImageIcon,
   Trash2,
 } from "lucide-react";
-import { POI } from "../types";
-import { LoadingSpinner } from "../components/LoadingSpinner";
+import { POI } from "../../types";
+import { LoadingSpinner } from "../../components/common/LoadingSpinner";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 

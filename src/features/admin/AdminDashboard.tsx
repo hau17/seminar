@@ -23,16 +23,17 @@ import {
   Eye,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { POI, Tour, DashboardStats, TourPOI, POIImage, TourImage } from "../types";
+import { POI, Tour, DashboardStats, TourPOI, POIImage, TourImage } from "../../types";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { ToastContainer } from "../components/Toast";
-import { LoadingSpinner } from "../components/LoadingSpinner";
-import { LoginPage } from "../components/LoginPage";
+import { ToastContainer } from "../../components/common/Toast";
+import { LoadingSpinner } from "../../components/common/LoadingSpinner";
+import { LoginPage } from "../auth/LoginPage";
 import { AdminBusinessesSection } from "./AdminBusinessesSection";
-import { validatePOI, validateTour } from "../utils/validation";
-import { usePOIs } from "../hooks/usePOIs";
-import { useTours } from "../hooks/useTours";
+import { POIDetailModal } from "../poi/POIDetailModal";
+import { validatePOI, validateTour } from "../../utils/validation";
+import { usePOIs } from "../../hooks/usePOIs";
+import { useTours } from "../../hooks/useTours";
 
 // Fix Leaflet marker icons
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -842,60 +843,16 @@ export function AdminDashboard() {
           </div>
         )}
 
-        {/* ── POI Info Modal (read-only view) ─────────────────────────────── */}
+        {/* ── POI Info Modal (read-only view / multi-language) ─────────────────────────────── */}
         <AnimatePresence>
           {selectedPoi && !isEditingPoi && (
-            <motion.div
-              key="poi-modal"
-              initial={{ opacity: 0, x: 30 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 30 }}
-              className="absolute top-4 right-4 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 z-[1000] max-h-[90vh] overflow-y-auto"
-            >
-              <div className="p-4">
-                <div className="flex items-start justify-between mb-3">
-                  <h3 className="font-bold text-base">{selectedPoi.name}</h3>
-                  <button onClick={() => setSelectedPoi(null)} className="text-slate-400 hover:text-slate-600">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <p className="text-sm text-slate-600 mb-2">{selectedPoi.description}</p>
-                <div className="text-xs text-slate-500 space-y-1 mb-3">
-                  <div>📍 {selectedPoi.lat.toFixed(6)}, {selectedPoi.lng.toFixed(6)}</div>
-                  <div>📏 Phạm vi: {selectedPoi.range_m}m</div>
-                  <div>👤 {selectedPoi.owner_type === "admin" ? "Admin" : "Doanh nghiệp"}</div>
-                </div>
-                <ImageGrid images={selectedPoi.images} size="md" />
-
-                {/* Translation badges */}
-                {selectedPoi.translations && selectedPoi.translations.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {selectedPoi.translations.map((tr) => (
-                      <span key={tr.language_code} className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 uppercase">
-                        {tr.language_code}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex gap-2 mt-4">
-                  {selectedPoi.owner_type === "admin" && (
-                    <button
-                      onClick={() => openPoiEdit(selectedPoi)}
-                      className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-500 text-white text-sm py-2 rounded-lg hover:bg-emerald-600 transition-colors"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" /> Sửa
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleDeletePoi(selectedPoi)}
-                    className="flex-1 flex items-center justify-center gap-1.5 bg-red-50 text-red-500 text-sm py-2 rounded-lg hover:bg-red-100 transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" /> Xóa
-                  </button>
-                </div>
-              </div>
-            </motion.div>
+            <POIDetailModal
+              poi={selectedPoi}
+              token={authToken}
+              onClose={() => setSelectedPoi(null)}
+              onEdit={selectedPoi.owner_type === "admin" ? () => openPoiEdit(selectedPoi) : undefined}
+              onDelete={() => handleDeletePoi(selectedPoi)}
+            />
           )}
         </AnimatePresence>
 

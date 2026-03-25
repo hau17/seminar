@@ -1,7 +1,7 @@
 import React from "react";
 import { MapPin } from "lucide-react";
 import { motion } from "motion/react";
-import { LoadingSpinner } from "./LoadingSpinner";
+import { LoadingSpinner } from "../../components/common/LoadingSpinner";
 
 interface LoginPageProps {
   email: string;

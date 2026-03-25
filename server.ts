@@ -199,15 +199,36 @@ async function seedAdmin() {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+const runPythonScript = (scriptName: string, args: string[]): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(__dirname, "scripts", scriptName); 
+    const pyProg = spawn("python", [scriptPath, ...args]);
+    
+    let output = "";
+    let error = "";
+
+    pyProg.stdout.on("data", (data) => { output += data.toString(); });
+    pyProg.stderr.on("data", (data) => { error += data.toString(); });
+
+    pyProg.on("close", (code) => {
+      if (code === 0) resolve(output.trim());
+      else reject(new Error(`Python Script Failed (${code}): ${error}`));
+    });
+  });
+};
+
 function generateAudio(poiId: number, description: string) {
   const fileName = `poi_${poiId}_vi_v0.mp3`;
   const relativePath = `/uploads/audio/${fileName}`;
   const absolutePath = path.join(audioDir, fileName);
 
+  const langRow = db.prepare("SELECT tts_voice FROM languages WHERE code='vi'").get() as any;
+  const ttsVoice = langRow ? langRow.tts_voice : 'vi-VN-HoaiMyNeural';
+
   const pyProcess = spawn("python", [
     "scripts/tts.py",
     "--text", description,
-    "--lang", "vi",
+    "--voice", ttsVoice,
     "--output", absolutePath
   ]);
 
@@ -221,7 +242,7 @@ function generateAudio(poiId: number, description: string) {
           INSERT INTO poi_audio_files (poi_id, language_code, version, file_path)
           VALUES (?, 'vi', 0, ?)
           ON CONFLICT(poi_id, language_code) 
-          DO UPDATE SET file_path=excluded.file_path, version=version+1
+          DO UPDATE SET file_path=excluded.file_path, version=0
         `).run(poiId, relativePath);
         console.log(`[TTS] Generated audio for POI ${poiId} successfully at ${relativePath}`);
       } catch (err) {
@@ -233,15 +254,33 @@ function generateAudio(poiId: number, description: string) {
   });
 }
 
-function deleteFile(filePath: string) {
+// Cập nhật hàm deleteFile cho chuẩn
+function deleteFile(relativePath) {
+  if (!relativePath) return;
   try {
-    const abs = path.join(__dirname, "public", filePath);
-    if (fs.existsSync(abs)) fs.unlinkSync(abs);
+    const absPath = path.join(__dirname, "public", relativePath);
+    if (fs.existsSync(absPath)) {
+      fs.unlinkSync(absPath);
+      console.log(`[FS] Deleted: ${relativePath}`);
+    }
   } catch (e) {
-    console.warn("[FS] Could not delete:", filePath, e);
+    console.warn("[FS] Could not delete:", relativePath, e.message);
   }
 }
 
+// Hàm dọn dẹp tất cả tài nguyên (Ảnh + Audio) của một POI
+function cleanupPoiResources(poiId) {
+  // 1. Xóa ảnh
+  const images = db.prepare("SELECT file_path FROM poi_images WHERE poi_id=?").all(poiId);
+  images.forEach((img) => deleteFile(img.file_path));
+
+  // 2. Xóa audio
+  const audios = db.prepare("SELECT file_path FROM poi_audio_files WHERE poi_id=?").all(poiId);
+  audios.forEach((audio) => deleteFile(audio.file_path));
+
+  // Lưu ý: ON DELETE CASCADE trong DB sẽ tự dọn dẹp các bản ghi trong table
+  // poi_images và poi_audio_files, nên ta chỉ cần dọn file vật lý ở đây.
+}
 function getPoisWithImages(poiRows: any[]) {
   if (!poiRows.length) return [];
   const ids = poiRows.map((p) => p.id).join(",");
@@ -430,6 +469,68 @@ async function startServer() {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // AUDIO ON DEMAND ROUTES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.post("/api/audio/generate", async (req, res) => {
+    try {
+      const { poi_id, language_code } = req.body;
+      if (!poi_id || !language_code) return res.status(400).json({ error: "Missing poi_id or language_code" });
+
+      const poi = db.prepare("SELECT * FROM pois WHERE id = ?").get(poi_id) as any;
+      if (!poi) return res.status(404).json({ error: "POI not found" });
+
+      const langRow = db.prepare("SELECT tts_voice FROM languages WHERE code=?").get(language_code) as any;
+      if (!langRow) return res.status(400).json({ error: "Ngôn ngữ không được hỗ trợ" });
+      const ttsVoice = langRow.tts_voice;
+
+      let translatedText = poi.description;
+
+      if (language_code !== "vi") {
+        const existingTrans = db.prepare("SELECT * FROM poi_translations WHERE poi_id=? AND language_code=?").get(poi_id, language_code) as any;
+        if (existingTrans) {
+          translatedText = existingTrans.translated_description;
+        } else {
+          // deep_translator requires EXACTLY zh-CN for Chinese. For others, language_code is enough.
+          const transLang = language_code === "zh" ? "zh-CN" : language_code;
+          translatedText = await runPythonScript("translate.py", ["--text", poi.description, "--lang", transLang]);
+          db.prepare("INSERT INTO poi_translations (poi_id, language_code, translated_description) VALUES (?, ?, ?)")
+            .run(poi_id, language_code, translatedText);
+        }
+      }
+
+      const highestVersionRecord = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poi_id) as any;
+      const useVersion = highestVersionRecord ? highestVersionRecord.version : 0;
+
+      const existingAudio = db.prepare("SELECT * FROM poi_audio_files WHERE poi_id=? AND language_code=? AND version=?").get(poi_id, language_code, useVersion) as any;
+      
+      if (existingAudio) {
+        return res.json({ 
+          success: true, already_existed: true, file_path: existingAudio.file_path, 
+          translated_description: translatedText, audio_version: useVersion 
+        });
+      }
+
+      const fileName = `poi_${poi_id}_${language_code}_v${useVersion}.mp3`;
+      const absolutePath = path.join(audioDir, fileName);
+
+      await runPythonScript("tts.py", ["--text", translatedText, "--voice", ttsVoice, "--output", absolutePath]);
+
+      const publicFilePath = `/uploads/audio/${fileName}`;
+      db.prepare("INSERT INTO poi_audio_files (poi_id, language_code, version, file_path) VALUES (?, ?, ?, ?)")
+        .run(poi_id, language_code, useVersion, publicFilePath);
+
+      res.json({
+        success: true, already_existed: false, file_path: publicFilePath,
+        translated_description: translatedText, audio_version: useVersion
+      });
+    } catch (err) {
+      console.error("POST /api/audio/generate:", err);
+      res.status(500).json({ error: "Server Internal Error" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // ADMIN — DASHBOARD
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -582,9 +683,31 @@ async function startServer() {
           ).run(poiId, `/uploads/pois/${f.filename}`, currentCount + idx);
         });
 
-        // NOTE: TTS bypass — audio/translations NOT modified here
+        // AUDIO VERSIONING (Cache Invalidation)
+        const highestVerRow = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poiId) as any;
+        const newVersion = (highestVerRow ? highestVerRow.version : 0) + 1;
+        
+        // Delete all old audio files & translations
+        const oldAudios = db.prepare("SELECT file_path FROM poi_audio_files WHERE poi_id=?").all(poiId) as any[];
+        oldAudios.forEach((a) => deleteFile(a.file_path));
+        db.prepare("DELETE FROM poi_audio_files WHERE poi_id=?").run(poiId);
+        db.prepare("DELETE FROM poi_translations WHERE poi_id=?").run(poiId);
 
-        res.json({ success: true });
+        // Generate new Vietnamese audio async
+        const newFileName = `poi_${poiId}_vi_v${newVersion}.mp3`;
+        const newRelPath = `/uploads/audio/${newFileName}`;
+        const newAbsPath = path.join(audioDir, newFileName);
+        
+        const langRow = db.prepare("SELECT tts_voice FROM languages WHERE code='vi'").get() as any;
+        const viVoice = langRow ? langRow.tts_voice : 'vi-VN-HoaiMyNeural';
+        const pyProcess = spawn("python", ["scripts/tts.py", "--text", descVal, "--voice", viVoice, "--output", newAbsPath]);
+        pyProcess.on("close", (code) => {
+          if (code === 0) {
+            db.prepare("INSERT INTO poi_audio_files (poi_id, language_code, version, file_path) VALUES (?, 'vi', ?, ?)").run(poiId, newVersion, newRelPath);
+          }
+        });
+
+        res.json({ success: true, audio_version: newVersion });
       } catch (e) {
         console.error("PUT /api/admin/pois/:id:", e);
         res.status(500).json({ error: "Lỗi cập nhật POI" });
@@ -629,37 +752,35 @@ async function startServer() {
     }
   });
 
-  // DELETE business POI (by admin)
-  app.delete("/api/admin/pois/business/:poi_id", adminAuth, (req: any, res) => {
-    try {
-      const poiId = parseInt(req.params.poi_id);
-      const poi = db.prepare("SELECT * FROM pois WHERE id=? AND owner_type='business'").get(poiId) as any;
-      if (!poi) return res.status(404).json({ error: "POI không tồn tại" });
+// DELETE business POI (by admin)
+app.delete("/api/admin/pois/business/:poi_id", adminAuth, (req: any, res) => {
+  try {
+    const poiId = parseInt(req.params.poi_id);
 
-      const tours = db
-        .prepare(
-          `SELECT t.id, t.name FROM tour_pois tp
-           JOIN tours t ON t.id = tp.tour_id
-           WHERE tp.poi_id = ?`
-        )
-        .all(poiId) as any[];
-      if (tours.length > 0)
-        return res.status(409).json({
-          error: "Không thể xóa POI đang nằm trong Tour",
-          tours,
-        });
+    // BƯỚC 1: Phải lấy đường dẫn file TRƯỚC khi chạm vào bất kỳ lệnh DELETE nào
+    const images = db.prepare("SELECT file_path FROM poi_images WHERE poi_id=?").all(poiId) as any[];
+    const audios = db.prepare("SELECT file_path FROM poi_audio_files WHERE poi_id=?").all(poiId) as any[];
 
-      const images = db.prepare("SELECT file_path FROM poi_images WHERE poi_id=?").all(poiId) as any[];
-      images.forEach((img) => deleteFile(img.file_path));
+    const poi = db.prepare("SELECT id FROM pois WHERE id=? AND owner_type='business'").get(poiId) as any;
+    if (!poi) return res.status(404).json({ error: "POI không tồn tại" });
 
-      db.prepare("DELETE FROM pois WHERE id=?").run(poiId);
-      res.json({ success: true });
-    } catch (e) {
-      console.error("DELETE /api/admin/pois/business/:poi_id:", e);
-      res.status(500).json({ error: "Lỗi xóa POI doanh nghiệp" });
-    }
-  });
+    // BƯỚC 2: Kiểm tra Tour (giữ nguyên)
+    const tours = db.prepare(`SELECT t.id FROM tour_pois tp JOIN tours t ON t.id = tp.tour_id WHERE tp.poi_id = ?`).all(poiId);
+    if (tours.length > 0) return res.status(409).json({ error: "POI đang trong Tour", tours });
 
+    // BƯỚC 3: Xóa file vật lý bằng danh sách đã lấy ở Bước 1
+    images.forEach((img) => deleteFile(img.file_path));
+    audios.forEach((audio) => deleteFile(audio.file_path));
+
+    // BƯỚC 4: Cuối cùng mới xóa DB (Lúc này CASCADE mới kích hoạt)
+    db.prepare("DELETE FROM pois WHERE id=?").run(poiId);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Lỗi xóa POI doanh nghiệp" });
+  }
+});
   // ═══════════════════════════════════════════════════════════════════════════
   // ADMIN — TOUR MANAGEMENT
   // ═══════════════════════════════════════════════════════════════════════════
@@ -980,7 +1101,32 @@ async function startServer() {
           );
         });
 
-        res.json({ success: true });
+        // AUDIO VERSIONING (Cache Invalidation)
+        const highestVerRow = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poiId) as any;
+        const newVersion = (highestVerRow ? highestVerRow.version : 0) + 1;
+        
+        // Delete all old audio files & translations
+        const oldAudios = db.prepare("SELECT file_path FROM poi_audio_files WHERE poi_id=?").all(poiId) as any[];
+        oldAudios.forEach((a) => deleteFile(a.file_path));
+        db.prepare("DELETE FROM poi_audio_files WHERE poi_id=?").run(poiId);
+        db.prepare("DELETE FROM poi_translations WHERE poi_id=?").run(poiId);
+
+        // Generate new Vietnamese audio async
+        const newDesc = description?.trim() || poi.description;
+        const newFileName = `poi_${poiId}_vi_v${newVersion}.mp3`;
+        const newRelPath = `/uploads/audio/${newFileName}`;
+        const newAbsPath = path.join(audioDir, newFileName);
+        
+        const langRow = db.prepare("SELECT tts_voice FROM languages WHERE code='vi'").get() as any;
+        const viVoice = langRow ? langRow.tts_voice : 'vi-VN-HoaiMyNeural';
+        const pyProcess = spawn("python", ["scripts/tts.py", "--text", newDesc, "--voice", viVoice, "--output", newAbsPath]);
+        pyProcess.on("close", (code) => {
+          if (code === 0) {
+            db.prepare("INSERT INTO poi_audio_files (poi_id, language_code, version, file_path) VALUES (?, 'vi', ?, ?)").run(poiId, newVersion, newRelPath);
+          }
+        });
+
+        res.json({ success: true, audio_version: newVersion });
       } catch (e) {
         console.error("PUT /api/business/pois/:id:", e);
         res.status(500).json({ error: "Lỗi cập nhật POI" });
@@ -988,36 +1134,49 @@ async function startServer() {
     }
   );
 
-  app.delete("/api/business/pois/:id", businessAuth, (req: any, res) => {
-    try {
-      const poiId = parseInt(req.params.id);
-      const poi = db
-        .prepare("SELECT * FROM pois WHERE id=? AND owner_type='business' AND owner_id=?")
-        .get(poiId, req.business_id) as any;
-      if (!poi) return res.status(403).json({ error: "Không có quyền xóa POI này" });
+app.delete("/api/business/pois/:id", businessAuth, (req: any, res) => {
+  try {
+    const poiId = parseInt(req.params.id);
 
-      const tours = db
-        .prepare(
-          `SELECT t.id, t.name FROM tour_pois tp
-           JOIN tours t ON t.id = tp.tour_id WHERE tp.poi_id = ?`
-        )
-        .all(poiId) as any[];
-      if (tours.length > 0)
-        return res.status(409).json({
-          error: "Không thể xóa POI đang nằm trong Tour",
-          tours,
-        });
+    // BƯỚC 1: Kiểm tra quyền sở hữu và lấy data TRƯỚC
+    const poi = db
+      .prepare("SELECT * FROM pois WHERE id=? AND owner_type='business' AND owner_id=?")
+      .get(poiId, req.business_id) as any;
+    
+    if (!poi) return res.status(403).json({ error: "Không có quyền xóa POI này hoặc POI không tồn tại" });
 
-      const images = db.prepare("SELECT file_path FROM poi_images WHERE poi_id=?").all(poiId) as any[];
-      images.forEach((img) => deleteFile(img.file_path));
+    // BƯỚC 2: Lấy danh sách file vật lý TRƯỚC khi xóa DB
+    const images = db.prepare("SELECT file_path FROM poi_images WHERE poi_id=?").all(poiId) as any[];
+    const audios = db.prepare("SELECT file_path FROM poi_audio_files WHERE poi_id=?").all(poiId) as any[];
 
-      db.prepare("DELETE FROM pois WHERE id=?").run(poiId);
-      res.json({ success: true });
-    } catch (e) {
-      console.error("DELETE /api/business/pois/:id:", e);
-      res.status(500).json({ error: "Lỗi xóa POI" });
-    }
-  });
+    // BƯỚC 3: Kiểm tra Tour (giữ nguyên)
+    const tours = db
+      .prepare(
+        `SELECT t.id, t.name FROM tour_pois tp
+         JOIN tours t ON t.id = tp.tour_id WHERE tp.poi_id = ?`
+      )
+      .all(poiId) as any[];
+      
+    if (tours.length > 0)
+      return res.status(409).json({
+        error: "Không thể xóa POI đang nằm trong Tour",
+        tours,
+      });
+
+    // BƯỚC 4: Xóa file vật lý
+    images.forEach((img) => deleteFile(img.file_path));
+    audios.forEach((audio) => deleteFile(audio.file_path));
+
+    // BƯỚC 5: Xóa trong Database (Lúc này các bảng liên quan sẽ tự động CASCADE)
+    db.prepare("DELETE FROM pois WHERE id=?").run(poiId);
+
+    res.json({ success: true, message: "Doanh nghiệp đã xóa POI thành công" });
+  } catch (e) {
+    console.error("DELETE /api/business/pois/:id:", e);
+    res.status(500).json({ error: "Lỗi hệ thống khi xóa POI" });
+  }
+});
+
 
   // ─── SPA fallback ──────────────────────────────────────────────────────────
   app.use(express.static(path.join(__dirname, "dist")));

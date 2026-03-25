@@ -5,10 +5,10 @@ import {
   Route,
   Navigate,
 } from "react-router-dom";
-import { AdminDashboard } from "./pages/AdminDashboard";
-import { BusinessAuth } from "./pages/BusinessAuth";
-import { BusinessDashboard } from "./pages/BusinessDashboard";
-import { BusinessAuthGuard } from "./components/BusinessAuthGuard";
+import { AdminDashboard } from "./features/admin/AdminDashboard";
+import { BusinessAuth } from "./features/auth/BusinessAuth";
+import { BusinessDashboard } from "./features/business/BusinessDashboard";
+import { BusinessAuthGuard } from "./features/auth/BusinessAuthGuard";
 
 export default function App() {
   return (
