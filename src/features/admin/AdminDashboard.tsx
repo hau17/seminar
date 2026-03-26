@@ -208,7 +208,7 @@ export function AdminDashboard() {
 
   // POI form state
   const [poiForm, setPoiForm] = useState<Partial<POI>>({
-    name: "", description: "", lat: 0, lng: 0, range_m: 0,
+    name: "", description: "", lat: 0, lng: 0, range_m: 1,
   });
   const [poiNewImages, setPoiNewImages] = useState<File[]>([]);
   const [poiDeleteImageIds, setPoiDeleteImageIds] = useState<number[]>([]);
@@ -326,7 +326,7 @@ export function AdminDashboard() {
   // ─── POI handlers ────────────────────────────────────────────────────────────
   const openPoiCreate = (lat: number, lng: number) => {
     setNewPoiPos([lat, lng]);
-    setPoiForm({ name: "", description: "", lat, lng, range_m: 0 });
+    setPoiForm({ name: "", description: "", lat, lng, range_m: 1 });
     setPoiNewImages([]);
     setPoiDeleteImageIds([]);
     setSelectedPoi(null);
@@ -352,7 +352,7 @@ export function AdminDashboard() {
       setIsEditingPoi(false);
       setSelectedPoi(null);
       setNewPoiPos(null);
-      setPoiForm({ name: "", description: "", lat: 0, lng: 0, range_m: 0 });
+      setPoiForm({ name: "", description: "", lat: 0, lng: 0, range_m: 1 });
       setPoiNewImages([]);
       setPoiDeleteImageIds([]);
       showToast(poiForm.id ? "Cập nhật POI thành công" : "Tạo POI thành công", "success");
@@ -815,9 +815,9 @@ export function AdminDashboard() {
                         click: () => setSelectedPoi(poi),
                       }}
                     />
-                    {poi.range_m > 0 && (
+                    {poi.range_m >= 1 && (
                       <Circle
-                        center={[poi.lat, poi.lng]}
+                        center={[poi.lat, poi.lng] as [number, number]}
                         radius={poi.range_m}
                         pathOptions={{ color: "#22c55e", fillColor: "#22c55e", fillOpacity: 0.05, weight: 1, dashArray: "4" }}
                       />
@@ -938,9 +938,9 @@ export function AdminDashboard() {
                   <span className="text-xs font-semibold text-slate-600">Phạm vi Range (mét)</span>
                   <input
                     type="number"
-                    min={0}
-                    value={poiForm.range_m ?? 0}
-                    onChange={(e) => setPoiForm({ ...poiForm, range_m: parseInt(e.target.value) || 0 })}
+                    min={1}
+                    value={poiForm.range_m ?? 1}
+                    onChange={(e) => setPoiForm({ ...poiForm, range_m: parseInt(e.target.value) || 1 })}
                     className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400"
                   />
                 </label>

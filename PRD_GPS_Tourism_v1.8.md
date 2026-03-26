@@ -301,7 +301,7 @@ Khi Admin click vào vùng trống trên bản đồ (không phải chấm POI):
 | Mô tả           | textarea        | ✅       | Không được để trống (dùng để tạo audio TTS)           |
 | Kinh độ (Lng)   | number          | ✅       | Số thực, [-180, 180], tối đa 6 chữ số thập phân       |
 | Vĩ độ (Lat)     | number          | ✅       | Số thực, [-90, 90], tối đa 6 chữ số thập phân         |
-| Phạm vi (Range) | number          | ❌       | Số nguyên ≥ 0, mặc định = 0                           |
+| Phạm vi (Range) | number          | ❌       | Số nguyên ≥ 1, mặc định = 1                            |
 | Ảnh             | file (multiple) | ❌       | Tối đa 5 ảnh, mỗi ảnh max 5MB, định dạng JPG/PNG/WebP |
 
 **Lưu ý lat/lng trong form:** Mặc dù bản đồ đã cung cấp tọa độ, Admin vẫn có thể chỉnh sửa tay. Khi chỉnh tay, marker tạm trên bản đồ cập nhật real-time theo giá trị nhập.
@@ -548,7 +548,7 @@ Click "+ Thêm POI" → Form thêm POI:
 | Mô tả           | textarea        | ✅       | Không được để trống                        |
 | Kinh độ (Lng)   | number          | ✅       | Số thực, [-180, 180], ≤ 6 chữ số thập phân |
 | Vĩ độ (Lat)     | number          | ✅       | Số thực, [-90, 90], ≤ 6 chữ số thập phân   |
-| Phạm vi (Range) | number          | ❌       | Số nguyên ≥ 0, mặc định = 0                |
+| Phạm vi (Range) | number          | ❌       | Số nguyên ≥ 1, mặc định = 1             |
 | Ảnh             | file (multiple) | ❌       | Tối đa 5 ảnh, max 5MB/ảnh, JPG/PNG/WebP    |
 
 > **Không có bản đồ** trong Business Portal. Doanh nghiệp nhập tay tọa độ. Validate theo định dạng: `10.630297, 106.599131`.
@@ -752,7 +752,7 @@ Submit → `PUT /api/user/tours/:id`
 - Hiển thị **vị trí hiện tại của user** (chấm xanh dương, cập nhật GPS real-time)
 - Hiển thị **tất cả POI** (chấm xanh lá) trong phạm vi nhìn thấy trên bản đồ
 - Có thể zoom in/out, pan
-- Circle hiển thị phạm vi Range của mỗi POI (nét đứt, màu xanh nhạt) nếu range > 0
+- Circle hiển thị phạm vi Range của mỗi POI (nét đứt, màu xanh nhạt) nếu range >= 1
 
 **Nhấn vào chấm POI trên bản đồ:**
 
@@ -767,7 +767,7 @@ Submit → `PUT /api/user/tours/:id`
 ```
 User di chuyển → GPS cập nhật vị trí
                      ↓
-          Tính khoảng cách đến tất cả POI có range > 0
+          Tính khoảng cách đến tất cả POI có range >= 1
                      ↓
     ┌────────────────────────────────────────────────┐
     │  Với mỗi POI trong phạm vi theo dõi (5km):    │
@@ -933,7 +933,7 @@ if __name__ == "__main__":
 | BR-16 | Số lượng ảnh tối đa: 5 ảnh/POI, 5 ảnh/Tour. Khi sửa có thể xóa từng ảnh và thêm mới (tổng ≤ 5).                                                   |
 | BR-17 | Tour của Admin có: tên + mô tả + ảnh + danh sách POI. Tour của User có: tên + danh sách POI (không có mô tả và ảnh).                              |
 | BR-18 | Khi xóa Tour → không xóa POI, chỉ xóa record Tour và các liên kết `tour_pois`.                                                                    |
-| BR-19 | POI range mặc định = 0 nếu không nhập. POI với range = 0 không kích hoạt audio proximity trigger.                                                 |
+| BR-19 | POI range mặc định = 1 nếu không nhập.                                          |
 | BR-20 | Doanh nghiệp đăng ký không cần Admin duyệt. Tự động được phép đăng nhập ngay sau khi đăng ký.                                                     |
 
 ---
@@ -988,7 +988,7 @@ CREATE TABLE IF NOT EXISTS pois (
   description TEXT    NOT NULL,        -- Mô tả tiếng Việt gốc (bắt buộc)
   lat         REAL    NOT NULL,        -- [-90, 90]
   lng         REAL    NOT NULL,        -- [-180, 180]
-  range_m     INTEGER NOT NULL DEFAULT 0,  -- Phạm vi (mét), ≥ 0
+  range_m     INTEGER NOT NULL DEFAULT 1,  -- Phạm vi (mét), >= 1
   owner_type  TEXT    NOT NULL,        -- 'admin' hoặc 'business'
   owner_id    INTEGER NOT NULL,        -- id trong admins hoặc businesses
   created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1175,7 +1175,7 @@ POST /api/admin/pois
     - description: text (bắt buộc)
     - lat: number (bắt buộc)
     - lng: number (bắt buộc)
-    - range_m: number (tùy chọn, default 0)
+    - range_m: number (tùy chọn, default 1)
     - images[]: file array (tối đa 5 file, mỗi file <= 5MB)
   201: { id: number, name: string, description: string, lat: number, lng: number, range_m: number }
   400: { error: "Dữ liệu không hợp lệ", fields: { ... } }

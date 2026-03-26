@@ -10,8 +10,8 @@ export const validatePOI = (poi: Partial<POI>): string | null => {
   if (poi.lng === undefined || poi.lng === null || poi.lng < -180 || poi.lng > 180)
     return "Kinh độ phải trong khoảng [-180, 180]";
 
-  if (poi.range_m !== undefined && (poi.range_m < 0 || !Number.isInteger(poi.range_m)))
-    return "Phạm vi phải là số nguyên ≥ 0";
+  if (poi.range_m !== undefined && (poi.range_m < 1 || !Number.isInteger(poi.range_m)))
+    return "Phạm vi phải là số nguyên ≥ 1";
 
   return null;
 };

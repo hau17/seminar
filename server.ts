@@ -92,7 +92,7 @@ db.exec(`
     description TEXT    NOT NULL,
     lat         REAL    NOT NULL,
     lng         REAL    NOT NULL,
-    range_m     INTEGER NOT NULL DEFAULT 0,
+    range_m     INTEGER NOT NULL DEFAULT 1,
     owner_type  TEXT    NOT NULL,
     owner_id    INTEGER NOT NULL,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -603,7 +603,7 @@ async function startServer() {
         if (isNaN(lngNum) || lngNum < -180 || lngNum > 180)
           return res.status(400).json({ error: "Kinh độ không hợp lệ" });
 
-        const rangeNum = range_m ? parseInt(range_m) : 0;
+        const rangeNum = range_m ? parseInt(range_m) : 1;
 
         const info = db
           .prepare(
@@ -1025,7 +1025,7 @@ app.delete("/api/admin/pois/business/:poi_id", adminAuth, (req: any, res) => {
         if (isNaN(lngNum) || lngNum < -180 || lngNum > 180)
           return res.status(400).json({ error: "Kinh độ không hợp lệ" });
 
-        const rangeNum = range_m ? parseInt(range_m) : 0;
+        const rangeNum = range_m ? parseInt(range_m) : 1;
 
         const info = db
           .prepare(

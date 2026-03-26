@@ -21,7 +21,7 @@ export function useBusinessPoiForm(poi: BusinessPOI | undefined, token: string, 
     description: poi?.description || "",
     lat: poi?.lat ?? ("" as number | string),
     lng: poi?.lng ?? ("" as number | string),
-    range_m: poi?.range_m ?? 0,
+    range_m: poi?.range_m ?? 1,
   });
 
   const [newFiles, setNewFiles] = useState<File[]>([]);
