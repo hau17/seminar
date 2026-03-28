@@ -7,7 +7,8 @@ import multer from "multer";
 import fs from "fs";
 import bcrypt from "bcrypt";
 import { spawn } from "child_process";
-
+import qrcode from "qrcode-terminal";
+import os from "os";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ─── Upload directories ───────────────────────────────────────────────────────
@@ -465,6 +466,51 @@ async function startServer() {
     } catch (e) {
       console.error("POST /api/auth/business/login:", e);
       res.status(500).json({ error: "Lỗi đăng nhập" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // END-USER (TOURIST) AUTH & DATA ROUTES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.post("/api/auth/user/register", async (req, res) => {
+    try {
+      const { name, email, password } = req.body;
+      if (!name || !email || !password) return res.status(400).json({ error: "Thiếu thông tin bắt buộc" });
+
+      const hash = await bcrypt.hash(password, 10);
+      const info = db.prepare("INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)").run(name, email, hash);
+      res.json({ success: true, user_id: info.lastInsertRowid });
+    } catch (e: any) {
+      if (e.message.includes("UNIQUE")) return res.status(400).json({ error: "Email đã tồn tại" });
+      res.status(500).json({ error: "Lỗi hệ thống" });
+    }
+  });
+
+  app.post("/api/auth/user/login", async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) return res.status(400).json({ error: "Thiếu credentials" });
+
+      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+      if (!user) return res.status(401).json({ error: "Sai email hoặc mật khẩu" });
+
+      const match = await bcrypt.compare(password, user.password_hash);
+      if (!match) return res.status(401).json({ error: "Sai email hoặc mật khẩu" });
+
+      const token = jwt.sign({ id: user.id, role: "user" }, JWT_SECRET, { expiresIn: "7d" });
+      res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
+    } catch (e) {
+      res.status(500).json({ error: "Lỗi đăng nhập" });
+    }
+  });
+
+  app.get("/api/user/pois/nearby", (req, res) => {
+    try {
+      const pois = db.prepare("SELECT * FROM pois").all();
+      res.json(pois);
+    } catch (e) {
+      res.status(500).json({ error: "Lỗi hệ thống" });
     }
   });
 
@@ -1177,16 +1223,43 @@ app.delete("/api/business/pois/:id", businessAuth, (req: any, res) => {
   }
 });
 
-
-  // ─── SPA fallback ──────────────────────────────────────────────────────────
+function getLocalIp() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]!) {
+      // Kiểm tra IPv4 và không phải là card mạng ảo/nội bộ
+      if (iface.family === "IPv4" && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return "localhost";
+}
+// ── SPA fallback ──────────────────────────────────────────────────────────
   app.use(express.static(path.join(__dirname, "dist")));
   app.get("*", (_req, res) => {
     res.sendFile(path.join(__dirname, "dist", "index.html"));
   });
 
-  app.listen(PORT, () => {
-    console.log(`[SERVER] Running on http://localhost:${PORT}`);
-  });
-}
+  // ── Khởi chạy Server và hiện QR ───────────────────────────────────────────
+app.listen(PORT, "0.0.0.0", () => {
+  // const localIp = getLocalIp();
+  // // CHÚ Ý: Đổi PORT ở đây thành 5173 để điện thoại vào đúng server Vite
+  // const FRONTEND_URL = `http://${localIp}:5173/app`; 
 
+  // console.log("\n" + "=".repeat(50));
+  // console.log(`📱 QUÉT MÃ QR ĐỂ MỞ APP USER (CỔNG 5173)`);
+  // console.log(`🔗 Link: ${FRONTEND_URL}`);
+  
+  // Hiện mã QR trỏ thẳng về cổng 5173
+  // qrcode.generate(FRONTEND_URL, { small: true });
+  // Sửa lại đoạn này
+const NGROK_URL = "https://unbribable-jettingly-winifred.ngrok-free.dev"; // Dán cái link ngrok bạn vừa lấy được vào đây
+qrcode.generate(NGROK_URL, { small: true });
+  
+  console.log("=".repeat(50) + "\n");
+});
+} // <--- Dấu ngoặc này đóng hàm startServer
+
+// Chạy hàm khởi tạo
 startServer().catch(console.error);

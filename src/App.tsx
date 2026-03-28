@@ -9,6 +9,12 @@ import { AdminDashboard } from "./features/admin/AdminDashboard";
 import { BusinessAuth } from "./features/auth/BusinessAuth";
 import { BusinessDashboard } from "./features/business/BusinessDashboard";
 import { BusinessAuthGuard } from "./features/auth/BusinessAuthGuard";
+import { UserLogin } from "./features/user/auth/UserLogin";
+import { UserRegister } from "./features/user/auth/UserRegister";
+import { UserLayout } from "./features/user/UserLayout";
+import { UserAuthGuard } from "./features/user/UserAuthGuard";
+import { InfoTab } from "./features/user/tabs/InfoTab";
+import { MapTab } from "./features/user/tabs/MapTab";
 
 export default function App() {
   return (
@@ -39,6 +45,15 @@ export default function App() {
             </BusinessAuthGuard>
           }
         />
+
+        {/* Tourist Routes (PWA) */}
+        <Route path="/user/login" element={<UserLogin />} />
+        <Route path="/user/register" element={<UserRegister />} />
+        <Route path="/user" element={<UserAuthGuard><UserLayout /></UserAuthGuard>}>
+          <Route path="info" element={<InfoTab />} />
+          <Route path="map" element={<MapTab />} />
+          <Route path="" element={<Navigate to="/user/info" replace />} />
+        </Route>
 
         {/* Default redirect */}
         <Route path="/" element={<Navigate to="/admin" replace />} />
