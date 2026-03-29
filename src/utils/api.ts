@@ -1,6 +1,6 @@
 export const api = {
   async get<T>(url: string): Promise<T> {
-    const token = localStorage.getItem("authToken");
+    const token = localStorage.getItem("user_token");
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -9,7 +9,7 @@ export const api = {
   },
 
   async post<T>(url: string, body: unknown): Promise<T> {
-    const token = localStorage.getItem("authToken");
+    const token = localStorage.getItem("user_token");
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -23,7 +23,7 @@ export const api = {
   },
 
   async put<T>(url: string, body: unknown): Promise<T> {
-    const token = localStorage.getItem("authToken");
+    const token = localStorage.getItem("user_token");
     const res = await fetch(url, {
       method: "PUT",
       headers: {
@@ -37,7 +37,7 @@ export const api = {
   },
 
   async delete<T>(url: string): Promise<T> {
-    const token = localStorage.getItem("authToken");
+    const token = localStorage.getItem("user_token");
     const res = await fetch(url, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },

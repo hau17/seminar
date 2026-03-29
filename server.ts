@@ -374,6 +374,21 @@ async function startServer() {
     }
   };
 
+  const userAuth = (req: any, res: any, next: any) => {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      // We accept 'user' role. Note: in /api/auth/user/login, we sign with { id, role: "user" }
+      if (decoded.role !== "user")
+        return res.status(403).json({ error: "User access required" });
+      req.user_id = decoded.id;
+      next();
+    } catch {
+      res.status(401).json({ error: "Invalid or expired token" });
+    }
+  };
+
   // ═══════════════════════════════════════════════════════════════════════════
   // AUTH ROUTES
   // ═══════════════════════════════════════════════════════════════════════════
@@ -508,9 +523,146 @@ async function startServer() {
   app.get("/api/user/pois/nearby", (req, res) => {
     try {
       const pois = db.prepare("SELECT * FROM pois").all();
-      res.json(pois);
+      res.json(getPoisWithImages(pois)); // Fixed: Return POIs with their images
     } catch (e) {
       res.status(500).json({ error: "Lỗi hệ thống" });
+    }
+  });
+
+  app.get("/api/user/tours", (req, res) => {
+    try {
+      let userId: number | null = null;
+      const token = req.headers.authorization?.split(" ")[1];
+      if (token) {
+        try {
+          const decoded: any = jwt.verify(token, JWT_SECRET);
+          if (decoded.role === "user") userId = decoded.id;
+        } catch (e) { /* Ignore invalid token for GET, just fallback to admin-only */ }
+      }
+
+      let rows: any[];
+      if (userId) {
+        // Lấy tour của admin HOẶC tour của chính user đó
+        rows = db.prepare(`
+          SELECT * FROM tours 
+          WHERE created_by_type = 'admin' 
+          OR (created_by_type = 'user' AND created_by_id = ?)
+          ORDER BY created_at DESC
+        `).all(userId) as any[];
+      } else {
+        // Khách (vãng lai) hoặc chưa đăng nhập: Chỉ thấy tour admin
+        rows = db.prepare("SELECT * FROM tours WHERE created_by_type='admin' ORDER BY created_at DESC").all() as any[];
+      }
+      
+      res.json(getToursWithDetails(rows));
+    } catch (e) {
+      console.error("GET /api/user/tours:", e);
+      res.status(500).json({ error: "Lỗi hệ thống" });
+    }
+  });
+
+  // POST Create User Tour
+  app.post("/api/user/tours", userAuth, (req: any, res) => {
+    const transaction = db.transaction((name: string, poiIds: number[], userId: number) => {
+      // 1. Insert Tour
+      const info = db.prepare(`
+        INSERT INTO tours (name, created_by_type, created_by_id) 
+        VALUES (?, 'user', ?)
+      `).run(name, userId);
+      
+      const tourId = info.lastInsertRowid as number;
+
+      // 2. Insert POIs
+      const insertPoi = db.prepare(`
+        INSERT INTO tour_pois (tour_id, poi_id, position) 
+        VALUES (?, ?, ?)
+      `);
+      
+      poiIds.forEach((poiId, idx) => {
+        insertPoi.run(tourId, poiId, idx + 1);
+      });
+
+      return tourId;
+    });
+
+    try {
+      const { name, poi_ids } = req.body;
+      if (!name?.trim()) return res.status(400).json({ error: "Tên tour không được rỗng" });
+      if (!Array.isArray(poi_ids) || poi_ids.length === 0) 
+        return res.status(400).json({ error: "Tour phải có ít nhất 1 điểm dừng" });
+
+      const tourId = transaction(name.trim(), poi_ids, req.user_id);
+      const created = db.prepare("SELECT * FROM tours WHERE id = ?").get(tourId);
+      res.status(201).json(getToursWithDetails([created as any])[0]);
+    } catch (e) {
+      console.error("POST /api/user/tours:", e);
+      res.status(500).json({ error: "Lỗi tạo tour" });
+    }
+  });
+
+  // PUT Update User Tour (Ownership Required)
+  app.put("/api/user/tours/:id", userAuth, (req: any, res) => {
+    const tourId = parseInt(req.params.id);
+    
+    // Check ownership first
+    const tour = db.prepare(`
+      SELECT * FROM tours 
+      WHERE id = ? AND created_by_type = 'user' AND created_by_id = ?
+    `).get(tourId, req.user_id) as any;
+
+    if (!tour) return res.status(403).json({ error: "Không có quyền chỉnh sửa tour này hoặc tour không tồn tại" });
+
+    const transaction = db.transaction((name: string, poiIds: number[]) => {
+      // 1. Update Name
+      db.prepare("UPDATE tours SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(name, tourId);
+
+      // 2. Refresh POIs (Delete and Re-insert)
+      db.prepare("DELETE FROM tour_pois WHERE tour_id = ?").run(tourId);
+      
+      const insertPoi = db.prepare(`
+        INSERT INTO tour_pois (tour_id, poi_id, position) 
+        VALUES (?, ?, ?)
+      `);
+      
+      poiIds.forEach((poiId, idx) => {
+        insertPoi.run(tourId, poiId, idx + 1);
+      });
+    });
+
+    try {
+      const { name, poi_ids } = req.body;
+      if (!name?.trim()) return res.status(400).json({ error: "Tên tour không được rỗng" });
+      if (!Array.isArray(poi_ids) || poi_ids.length === 0) 
+        return res.status(400).json({ error: "Tour phải có ít nhất 1 điểm dừng" });
+
+      transaction(name.trim(), poi_ids);
+      res.json({ success: true, message: "Cập nhật tour thành công" });
+    } catch (e) {
+      console.error("PUT /api/user/tours/:id:", e);
+      res.status(500).json({ error: "Lỗi cập nhật tour" });
+    }
+  });
+
+  // DELETE User Tour (Ownership Required)
+  app.delete("/api/user/tours/:id", userAuth, (req: any, res) => {
+    try {
+      const tourId = parseInt(req.params.id);
+      
+      // Check ownership
+      const tour = db.prepare(`
+        SELECT * FROM tours 
+        WHERE id = ? AND created_by_type = 'user' AND created_by_id = ?
+      `).get(tourId, req.user_id) as any;
+
+      if (!tour) return res.status(403).json({ error: "Không có quyền xóa tour này hoặc tour không tồn tại" });
+
+      // Delete (CASCADE will handle tour_pois)
+      db.prepare("DELETE FROM tours WHERE id = ?").run(tourId);
+      
+      res.json({ success: true, message: "Xóa tour thành công" });
+    } catch (e) {
+      console.error("DELETE /api/user/tours/:id:", e);
+      res.status(500).json({ error: "Lỗi xóa tour" });
     }
   });
 

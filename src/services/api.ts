@@ -1,8 +1,11 @@
 export async function fetchWithAuth(url: string, options: RequestInit = {}, token?: string | null) {
   const headers = new Headers(options.headers || {});
   
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
+  // Use provided token or fallback to localStorage
+  const effectiveToken = token || localStorage.getItem("user_token");
+  
+  if (effectiveToken) {
+    headers.set('Authorization', `Bearer ${effectiveToken}`);
   }
 
   // Define default accept content type headers

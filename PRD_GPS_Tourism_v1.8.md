@@ -588,28 +588,21 @@ Giống quy luật của Admin, cửa sổ sửa POI cho Doanh nghiệp cho sử
 - `POST /api/auth/user/register` → hash password → tạo record `users`
 - **Không tự động đăng nhập** → redirect về màn hình đăng nhập
 
-### 7.2 Đăng nhập User
+### 7.2 Đăng nhập User & Khởi tạo App (Session Init)
 
-**URL:** `/login`
+**Thời điểm thực hiện (Session Init):**
+- Ngay sau khi người dùng thực hiện **Đăng nhập** thành công.
+- Ngay sau khi **mở lại App** (trường hợp đã có sẵn JWT Token hợp lệ).
 
-**Form đăng nhập:**
+**Quy trình thực hiện:**
 
-- Email
-- Password
-- **Bắt buộc chọn ngôn ngữ** (dropdown — 5 lựa chọn): Tiếng Việt | English | 中文 | 日本語 | 한국어
-
-**Sau khi nhấn "Đăng nhập":**
-
-1. `POST /api/auth/user/login` với `{ email, password, language_code }`
-2. Lưu JWT token + `language_code` vào storage
-3. **Background job (async, không chặn UI):**
-   - Lấy vị trí hiện tại của user (GPS)
-   - Truy vấn tất cả POI trong bán kính 20km
-   - Với mỗi POI: kiểm tra xem đã có bản dịch `language_code` trong `poi_translations` chưa
-   - Nếu chưa: gọi `translate.py` để dịch → lưu vào `poi_translations`
-   - Tương tự cho Tour trong 20km (lưu vào `tour_translations`)
-4. Hiển thị loading indicator nhỏ "Đang tải nội dung ngôn ngữ của bạn..."
-5. Sau khi background job hoàn thành → redirect về màn hình chính
+1. Nếu là đăng nhập mới: `POST /api/auth/user/login` với `{ email, password, language_code }`. Lưu JWT token + `language_code` vào storage.
+2. **Background job (Session Init - Thực hiện DUY NHẤT 1 LẦN):**
+   - **Sync Version:** Gửi danh sách POI ID/Version hiện băm ở Local Cache lên Server (hoặc lấy danh sách POI gần nhất từ Server kèm Version mới nhất). Thực hiện đối chiếu toàn diện: Nếu `local_version` < `server_version`, đánh dấu cần xóa/tải lại.
+   - **Dịch thuật:** Truy vấn tất cả POI trong bán kính 20km. Với mỗi POI: kiểm tra/tạo bản dịch `language_code` nếu chưa có.
+   - **Tour:** Tương tự cho các Tour trong phạm vi 20km.
+3. **UX:** Hiển thị loading indicator "Đang đồng bộ dữ liệu..."
+4. Sau khi hoàn thành → Vào màn hình chính. Kể từ lúc này, hệ thống **tin tưởng hoàn toàn** vào dữ liệu cache đã đồng bộ, không thực hiện kiểm tra lại version trong suốt session để tiết kiệm băng thông.
 
 ### 7.3 Màn hình chính User
 
@@ -748,15 +741,21 @@ Submit → `PUT /api/user/tours/:id`
 
 **Giao diện:**
 
-- Bản đồ Leaflet full-screen
-- Hiển thị **vị trí hiện tại của user** (chấm xanh dương, cập nhật GPS real-time)
-- Hiển thị **tất cả POI** (chấm xanh lá) trong phạm vi nhìn thấy trên bản đồ
-- Có thể zoom in/out, pan
-- Circle hiển thị phạm vi Range của mỗi POI (nét đứt, màu xanh nhạt) nếu range >= 1
+- Bản đồ Leaflet full-screen.
+- Hiển thị **vị trí hiện tại của user** (chấm xanh dương, cập nhật GPS real-time).
+- Hiển thị **tất cả POI** (chấm xanh lá) trong phạm vi nhìn thấy trên bản đồ.
+- Có thể zoom in/out, pan.
+- Circle hiển thị phạm vi Range của mỗi POI (nét đứt, màu xanh nhạt) nếu range >= 1.
+- **Nút "Vị trí của tôi" (Locate Me FAB):** Một nút nổi (Floating Action Button) với biểu tượng định vị, được đặt cố định ở góc dưới bên phải giao diện bản đồ.
 
-**Nhấn vào chấm POI trên bản đồ:**
+**Hành vi (UX/Logic):**
 
-- Mở Popup Modal thông tin POI với các tính năng và logic hiển thị On-demand giống hệt mô tả ở **7.4.2**.
+- **Nhấn vào nút "Vị trí của tôi":**
+  - Hệ thống tự động dịch chuyển (panTo) tâm bản đồ về tọa độ GPS hiện tại của người dùng.
+  - Tự động điều chỉnh mức độ thu phóng (Zoom level) về mức tối ưu để quan sát khu vực xung quanh user.
+  - **Trường hợp ngoại lệ:** Nếu người dùng chưa bật GPS hoặc từ chối quyền truy cập vị trí, hệ thống hiển thị thông báo (Toast/Alert): *"Vui lòng bật GPS để xác định vị trí của bạn"*.
+- **Nhấn vào chấm POI trên bản đồ:**
+  - Mở Popup Modal thông tin POI với các tính năng và logic hiển thị On-demand giống hệt mô tả ở **7.4.2**.
 
 ---
 
@@ -804,25 +803,24 @@ POI A (id nhỏ hơn) không được phát trong suốt thời gian user ở tr
 ### 8.3 Xử lý dung lượng thiết bị và Quản lý Cache (Versioning)
 
 **Khi tải dữ liệu POI từ Server:**
-Các API như `/api/pois/:id` hoặc `/api/user/pois/nearby` luôn trả về kèm trường `version` mới nhất của file audio tương ứng với ngôn ngữ mà User đang sử dụng.
+Server trả về danh sách POI kèm `version` audio mới nhất. Toàn bộ thông tin này chỉ được đối chiếu với Local Cache **DUY NHẤT 1 LẦN** tại bước **Session Init** (Khởi tạo App hoặc Đăng nhập).
 
-**Logic đối chiếu Version tại App:**
-Trước khi quyết định hiển thị nút thao tác ("Nghe trực tuyến", "Tải xuống") hoặc tự động phát audio, App **bắt buộc** phải kiểm tra:
-1. **Kiểm tra tồn tại:** Trong local cache (bộ nhớ tạm của thiết bị) đã có file `poi_{id}_{lang}_v{local_version}.mp3` chưa?
-2. **So sánh Version Cache:**
-   - Nếu `local_version` < `server_version` (có nghĩa là Admin hoặc Doanh nghiệp đã tiến hành sửa đổi/cập nhật mô tả POI này):
-     - Hệ thống App phải **xóa bỏ** file âm thanh cũ tồn đọng ở local cache ngay lập tức.
-     - Cập nhật lại giao diện về trạng thái "Chưa tải", kích hoạt hiển thị lại nút "Tải xuống" để User chủ động lấy bản cập nhật mới (hoặc quá trình này sẽ tự động tải ngầm nếu User tiến vào phạm vi Pre-load).
-   - Nếu `local_version` == `server_version`: Xác nhận bản audio khả dụng là bản mới nhất. Tiếp tục giữ nguyên file trong cache để sử dụng ở chế độ Offline.
+**Logic đối chiếu Version tại App (Chỉ thực hiện tại Session Init):**
+Hệ thống App quét toàn bộ file `poi_{id}_{lang}_v{local_version}.mp3` trong cache và so sánh với `server_version`:
+1. **Nếu local_version < server_version:**
+   - App thực hiện **xóa bỏ** file cũ ở local cache ngay lập tức.
+   - Chuyển trạng thái nội dung này sang "Chưa tải" để sẵn sàng cho việc tải/stream bản mới.
+2. **Nếu local_version == server_version:** Xác nhận bản audio khả dụng là mới nhất. Giữ lại cache để sử dụng Offline.
 
-**Khi pre-load audio (User cách range 30m):**
-1. Kiểm tra dung lượng khả dụng của thiết bị: Nếu bộ nhớ trống < 50MB → Dừng tải và bỏ qua pre-load.
-2. Nếu đủ dung lượng và cần lấy bản mới (chưa có file tại local cache hoặc phát hiện version bị cũ): Tiến hành Download file audio chuẩn từ Server về lưu tại local cache của App.
+**Quy tắc "Tin tưởng Cache" (Trong suốt quá trình sử dụng):**
+Để tiết kiệm băng thông và tối ưu hiệu năng, sau khi đã hoàn tất bước đối chiếu tại Session Init, App sẽ:
+- **KHÔNG** gọi lại API để kiểm tra version khi User đi vào phạm vi POI (30m, 3m).
+- **TIN TƯỞNG HOÀN TOÀN** vào file audio đang có trong cache (vì nếu có version mới thì file cũ đã bị xóa ở bước Session Init).
 
 **Khi bắt đầu phát Audio (User đi vào phạm vi 3m):**
-- Nếu bản Audio có `version` đối chiếu khớp đã tồn tại trong local cache: Load và phát trực tiếp từ máy thiết bị (Hỗ trợ Offline).
-- Nếu chưa có sẵn trong local (có thể do lỗi mạng chưa tải xong phần pre-load hoặc do thiếu dung lượng < 50MB): Chuyển sang chế độ Stream, phát trực tiếp thông qua đường dẫn URL `/api/audio/stream/poi_{id}_{lang}_v{server_version}.mp3`.
-- Nếu hoàn toàn mất kết nối Internet & File chưa có cache: Ngưng phát tiến trình audio, hiển thị icon báo lỗi (🔇) trên bộ hiển thị POI Indicator.
+- Nếu file audio tồn tại trong cache: Phát trực tiếp từ máy (Offline).
+- Nếu cache không có file: Chuyển sang chế độ Stream URL `/api/audio/stream/poi_{id}_{lang}_v{server_version}.mp3`.
+- Nếu mất internet và không có cache: Hiển thị icon 🔇.
 
 
 ### 8.4 Luồng tạo Audio (Backend)
@@ -918,7 +916,7 @@ if __name__ == "__main__":
 | BR-01 | POI không thể xóa nếu đang nằm trong ít nhất 1 Tour (Admin hoặc User). Áp dụng cho cả Admin và Doanh nghiệp.                                      |
 | BR-02 | Mô tả POI là bắt buộc (không được để trống) vì dùng để tạo audio TTS.                                                                             |
 | BR-03 | Khi thêm mới POI → ngay lập tức tạo audio tiếng Việt (`vi_v0`).                                                                                   |
-| BR-04 | **Version Audio (Cache Invalidation):** Khi nội dung của một POI bị thay đổi, hệ thống **bắt buộc phải tăng (increment +1)** tham số `version` thay vì tự động reset về `0`. Server sẽ tiến hành xóa file audio cũ đi kèm toàn bộ bản dịch trước đó. Quá trình này sẽ kích hoạt việc tạo lại tự động file audio mô tả Tiếng Việt mới (từ `poi_5_vi_v0.mp3` tăng tuần tự lên `poi_5_vi_v1.mp3`, `poi_5_vi_v2.mp3`...). Các App (User Device) dùng chỉ số `version` trả về này để làm cơ sở tự động xóa bỏ cache file cũ và ép tải bản audio mới. |
+| BR-04 | **Version Audio (Cache Invalidation):** Khi nội dung của một POI bị thay đổi, hệ thống **bắt buộc phải tăng (increment +1)** tham số `version`. Server sẽ xóa file cũ và tạo lại bản mới. App người dùng sử dụng chỉ số này để xóa cache cũ; tuy nhiên, việc kiểm tra và đối chiếu version này **CHỈ thực hiện DUY NHẤT 1 LẦN** khi người dùng vừa khởi động ứng dụng hoặc đăng nhập (Session Init). Toàn bộ quá trình sử dụng sau đó (di chuyển, bật/tắt audio) hệ thống sẽ mặc định tin tưởng Cache local để tối ưu hóa băng thông. |
 | BR-05 | Khi xóa POI → xóa toàn bộ file audio + bản dịch + ảnh liên quan.                                                                                  |
 | BR-06 | Admin không thể sửa POI của Doanh nghiệp. Chỉ có thể xem và xóa (khi POI không trong tour).                                                       |
 | BR-07 | Doanh nghiệp không thể xóa POI của doanh nghiệp khác, không nhìn thấy POI của doanh nghiệp khác.                                                  |
