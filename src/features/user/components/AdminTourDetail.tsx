@@ -3,6 +3,7 @@ import { X, Map, Navigation, ChevronRight, Info } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { POIWithDistance } from "../hooks/useUserGPS";
 import { useState } from "react";
+import { UserPoiModal } from "./UserPoiModal";
 
 interface AdminTourDetailProps {
   tour: Tour;
@@ -15,6 +16,9 @@ interface AdminTourDetailProps {
 export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocusPoi, nearbyPOIs }: AdminTourDetailProps) {
   const navigate = useNavigate();
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
+  const [selectedPoi, setSelectedPoi] = useState<POIWithDistance | null>(null);
+
+  const lang = localStorage.getItem("user_lang") || "vi";
 
   const handleViewOnMap = () => {
     setHighlightedTour(tour);
@@ -25,10 +29,8 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
   const handlePoiClick = (poiId: number) => {
     const poi = nearbyPOIs.find(p => p.id === poiId);
     if (poi) {
-      setHighlightedTour(tour);
-      setMapFocusPoi(poi);
-      navigate("/user/map");
-      onClose();
+      // Mở Modal tại chỗ, KHÔNG nhảy sang Map
+      setSelectedPoi(poi);
     }
   };
 
@@ -95,22 +97,28 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
             <section>
               <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-3">Lộ trình ({tour.pois?.length || 0} điểm dừng)</h3>
               <div className="space-y-3">
-                {tour.pois?.sort((a, b) => a.position - b.position).map((tp) => (
-                  <div 
-                    key={tp.poi_id}
-                    onClick={() => handlePoiClick(tp.poi_id)}
-                    className="group flex items-center gap-4 p-3 rounded-2xl border border-gray-100 bg-white hover:border-blue-200 hover:bg-blue-50/30 active:scale-[0.98] transition-all cursor-pointer shadow-sm"
-                  >
-                    <div className="w-10 h-10 shrink-0 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg shadow-md group-hover:scale-110 transition-transform">
-                      {tp.position}
+                {tour.pois?.sort((a, b) => a.position - b.position).map((tp) => {
+                  // Hiển thị tên đã dịch nếu có, fallback về tp.name
+                  const fullPoi = nearbyPOIs.find(p => p.id === tp.poi_id);
+                  const displayName = fullPoi?.translations?.find(t => t.language_code === lang)?.translated_name
+                    || tp.name;
+                  return (
+                    <div 
+                      key={tp.poi_id}
+                      onClick={() => handlePoiClick(tp.poi_id)}
+                      className="group flex items-center gap-4 p-3 rounded-2xl border border-gray-100 bg-white hover:border-blue-200 hover:bg-blue-50/30 active:scale-[0.98] transition-all cursor-pointer shadow-sm"
+                    >
+                      <div className="w-10 h-10 shrink-0 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg shadow-md group-hover:scale-110 transition-transform">
+                        {tp.position}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-bold text-gray-800 text-sm truncate">{displayName}</h4>
+                        <p className="text-[10px] text-gray-400 font-medium">Nhấn để xem chi tiết</p>
+                      </div>
+                      <ChevronRight size={16} className="text-gray-300 group-hover:text-blue-500 transition-colors" />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-bold text-gray-800 text-sm truncate">{tp.name}</h4>
-                      <p className="text-[10px] text-gray-400 font-medium">Click để xem chi tiết</p>
-                    </div>
-                    <ChevronRight size={16} className="text-gray-300 group-hover:text-blue-500 transition-colors" />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           </div>
@@ -140,6 +148,9 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
            <img src={fullScreenImage} alt="Full screen preview" className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" />
         </div>
       )}
+
+      {/* POI Detail Modal (mở tại chỗ, không nhảy Map) */}
+      {selectedPoi && <UserPoiModal poi={selectedPoi} onClose={() => setSelectedPoi(null)} />}
     </>
   );
 }

@@ -3,6 +3,7 @@ import { POI } from '../types';
 
 interface UseAudioGenerateResult {
   audioUrl: string | null;
+  translatedName: string | null;
   translatedText: string | null;
   loading: boolean;
 }
@@ -10,6 +11,7 @@ interface UseAudioGenerateResult {
 export function useAudioGenerate(poi: POI | null, token: string | null, selectedLang: string): UseAudioGenerateResult {
   const [loading, setLoading] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [translatedName, setTranslatedName] = useState<string | null>(null);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
 
   useEffect(() => {
@@ -22,8 +24,10 @@ export function useAudioGenerate(poi: POI | null, token: string | null, selected
     if (existingAudio && (selectedLang === 'vi' || existingTranslation)) {
       setAudioUrl(`${existingAudio.file_path}?v=${existingAudio.version}`);
       if (selectedLang !== 'vi' && existingTranslation) {
+        setTranslatedName(existingTranslation.translated_name || null);
         setTranslatedText(existingTranslation.translated_description);
       } else {
+        setTranslatedName(null);
         setTranslatedText(null);
       }
       return;
@@ -33,6 +37,7 @@ export function useAudioGenerate(poi: POI | null, token: string | null, selected
     const fetchLanguageData = async () => {
       setLoading(true);
       setAudioUrl(null);
+      setTranslatedName(null);
       setTranslatedText(null);
 
       try {
@@ -52,6 +57,7 @@ export function useAudioGenerate(poi: POI | null, token: string | null, selected
         if (res.ok && data.success) {
           setAudioUrl(`${data.file_path}?v=${data.audio_version}`);
           if (selectedLang !== 'vi') {
+            setTranslatedName(data.translated_name || null);
             setTranslatedText(data.translated_description);
           }
         }
@@ -65,5 +71,5 @@ export function useAudioGenerate(poi: POI | null, token: string | null, selected
     fetchLanguageData();
   }, [selectedLang, poi, token]);
 
-  return { audioUrl, translatedText, loading };
+  return { audioUrl, translatedName, translatedText, loading };
 }

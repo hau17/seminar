@@ -20,7 +20,7 @@ const LANGUAGES = [
 
 export function PoiAudioModal({ poi, token, onClose }: PoiAudioModalProps) {
   const [selectedLang, setSelectedLang] = useState('vi');
-  const { audioUrl, translatedText, loading } = useAudioGenerate(poi, token, selectedLang);
+  const { audioUrl, translatedName, translatedText, loading } = useAudioGenerate(poi, token, selectedLang);
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/40">
@@ -66,10 +66,20 @@ export function PoiAudioModal({ poi, token, onClose }: PoiAudioModalProps) {
               </div>
             ) : (
               <div className="space-y-4">
-                {selectedLang !== 'vi' && translatedText && (
-                  <div>
-                    <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider block mb-1">Bản dịch:</span>
-                    <p className="text-sm text-slate-700 leading-relaxed italic">{translatedText}</p>
+                {selectedLang !== 'vi' && (translatedName || translatedText) && (
+                  <div className="space-y-2">
+                    {translatedName && (
+                      <div>
+                        <span className="text-xs font-bold text-blue-600 uppercase tracking-wider block mb-1">Tên đã dịch:</span>
+                        <p className="text-sm font-semibold text-slate-800">{translatedName}</p>
+                      </div>
+                    )}
+                    {translatedText && (
+                      <div>
+                        <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider block mb-1">Mô tả đã dịch:</span>
+                        <p className="text-sm text-slate-700 leading-relaxed italic">{translatedText}</p>
+                      </div>
+                    )}
                   </div>
                 )}
                 

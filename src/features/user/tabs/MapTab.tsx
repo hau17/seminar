@@ -30,6 +30,14 @@ const userIcon = new L.Icon({
   shadowSize: [41, 41],
 });
 
+const focusIcon = new L.Icon({
+  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png",
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+});
+
 // Helper component: FitBoundsToTour (Handles panning/zooming to see all points in a tour)
 function FitBoundsToTour({ highlightedTour, focusPoi }: { highlightedTour: Tour | null, focusPoi: POI | null }) {
   const map = useMap();
@@ -39,7 +47,10 @@ function FitBoundsToTour({ highlightedTour, focusPoi }: { highlightedTour: Tour 
     const lat = Number(focusPoi?.lat);
     const lng = Number(focusPoi?.lng);
     if (focusPoi && !isNaN(lat) && !isNaN(lng)) {
-      map.setView([lat, lng], 16, { animate: true });
+      map.flyTo([lat, lng], 16, { 
+        animate: true,
+        duration: 1.5
+      });
     }
   }, [focusPoi, map]);
 
@@ -177,6 +188,7 @@ export function MapTab() {
               <Marker 
                 position={[Number(p.lat), Number(p.lng)]} 
                 icon={createNumberedIcon(p.position)}
+                opacity={mapFocusPoi?.id === p.poi_id ? 1 : 0.8}
                 // Deep link POI details even if not in "nearby" dataset
                 eventHandlers={{ click: () => setSelectedPoi(nearbyPOIs.find(n => n.id === p.poi_id) || (p as any)) }}
               />
@@ -195,7 +207,8 @@ export function MapTab() {
             <React.Fragment key={`nearby-poi-${poi.id}`}>
               <Marker 
                 position={[Number(poi.lat), Number(poi.lng)]} 
-                icon={poiIcon}
+                icon={poi.id === mapFocusPoi?.id ? focusIcon : poiIcon}
+                zIndexOffset={poi.id === mapFocusPoi?.id ? 1000 : 0}
                 eventHandlers={{ click: () => setSelectedPoi(poi) }}
               />
               <Circle 

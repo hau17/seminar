@@ -275,9 +275,9 @@ Tương tự click trong danh sách: highlight + mở Popup Modal thông tin POI
 - Ảnh (hiển thị dạng thumbnail grid, tối đa 5 ảnh; click ảnh → xem full size)
 - **Dropdown chọn ngôn ngữ:** (Mặc định chọn Tiếng Việt).
 - **Phần thông tin theo ngôn ngữ đã chọn:**
-  - **Mô tả đã dịch:** Khi chọn một ngôn ngữ, hiển thị phần mô tả đã dịch của ngôn ngữ đó ở ngay bên dưới phần mô tả gốc.
+  - **Tên và Mô tả đã dịch:** Khi chọn một ngôn ngữ, hiển thị phần Tên đã dịch và Mô tả đã dịch của ngôn ngữ đó ở ngay bên dưới.
   - **Audio hướng dẫn:** CHỈ hiển thị duy nhất 1 file audio thuộc về ngôn ngữ vừa chọn (không list toàn bộ ngôn ngữ).
-  - **Logic On-demand:** Nếu ngôn ngữ được chọn chưa có bản dịch hoặc chưa có file audio, hệ thống sẽ tự động tiến hành dịch và tạo audio (gọi API sinh audio thông qua script Python `translate.py` và `tts.py`).
+  - **Logic On-demand:** Nếu ngôn ngữ được chọn chưa có bản dịch hoặc chưa có file audio, hệ thống sẽ tự động tiến hành dịch CẢ "Tên POI" và "Mô tả", đồng thời tạo audio (gọi API sinh audio thông qua script Python `translate.py` và `tts.py`).
   - **UX Loading:** Trong quá trình dịch thuật và sinh audio, giao diện hiển thị thông báo tiến độ hoàn thành ở bên dưới (ví dụ: "Đang dịch...", "Đang tạo audio..."). Khi quá trình này xong, thông báo tiến độ biến mất và sau đó hiển thị nội dung bản dịch, file audio kèm các nút thao tác (Play, Pause).
 
 **Action buttons:**
@@ -324,13 +324,15 @@ Admin chỉ được sửa POI do Admin tạo (`owner_type = 'admin'`).
 - Phạm vi (Range)
 - Ảnh: hiển thị 5 ảnh hiện tại (mỗi ảnh có nút ❌ xóa riêng), có thể upload thêm (tổng ≤ 5)
 **Sau khi submit:**
-1. `PUT /api/admin/pois/:id` — cập nhật POI trong DB (Backend tự động tính toán `new_version = old_version + 1`).
+1. `PUT /api/admin/pois/:id` — cập nhật POI trong DB.
 2. Xử lý ảnh (xóa ảnh bị xóa, upload ảnh mới).
-3. **Xóa toàn bộ file audio cũ** của POI này (mọi ngôn ngữ, mọi version): `DELETE /uploads/audio/poi_{id}_*.mp3`
-4. **Xóa records trong bảng `poi_audio_files`** (theo `poi_id`).
-5. **Xóa records trong bảng `poi_translations`** (bản dịch cũ không còn đúng chuẩn với mô tả mới).
-6. Gọi Python TTS tạo lại audio tiếng Việt lập tức với version gia tăng: `poi_{id}_vi_v{new_version}.mp3`.
-7. Lưu record audio mới vào bảng `poi_audio_files` tại cột phiên bản version = `new_version`.
+3. **LƯU Ý KHI THAY ĐỔI TÊN HOẶC MÔ TẢ:** Nếu Admin thay đổi "Tên POI" HOẶC "Mô tả", hệ thống bắt buộc phải:
+   - Tự động tính toán `new_version = old_version + 1`.
+   - **Xóa toàn bộ file audio cũ** của POI này (mọi ngôn ngữ, mọi version): `DELETE /uploads/audio/poi_{id}_*.mp3`
+   - **Xóa records trong bảng `poi_audio_files`**.
+   - **Xóa records trong bảng `poi_translations`** (xóa sạch toàn bộ bản dịch cũ vì nội dung gốc đã thay đổi).
+   - Gọi Python TTS tạo lại audio tiếng Việt lập tức với version gia tăng: `poi_{id}_vi_v{new_version}.mp3`.
+   - Lưu record audio mới vào bảng `poi_audio_files` tại cột phiên bản version = `new_version`.
 
 #### 5.4.6 Xóa POI
 
@@ -527,9 +529,9 @@ Hiển thị:
 - Ảnh (thumbnail, click xem full)
 - **Dropdown chọn ngôn ngữ:** (Mặc định chọn Tiếng Việt).
 - **Phần thông tin theo ngôn ngữ đã chọn:**
-  - **Mô tả đã dịch:** Khi chọn một ngôn ngữ, hiển thị phần mô tả đã dịch của ngôn ngữ đó ở ngay bên dưới phần mô tả gốc.
+  - **Tên và Mô tả đã dịch:** Khi chọn một ngôn ngữ, hiển thị phần Tên đã dịch và Mô tả đã dịch của ngôn ngữ đó ở ngay bên dưới.
   - **Audio hướng dẫn:** CHỈ hiển thị duy nhất 1 file audio thuộc về ngôn ngữ vừa chọn (không list toàn bộ).
-  - **Logic On-demand:** Nếu ngôn ngữ được chọn chưa có bản dịch hoặc chưa có file audio, hệ thống sẽ tự động tiến hành dịch và tạo audio (gọi script Python `translate.py` và `tts.py`).
+  - **Logic On-demand:** Nếu ngôn ngữ được chọn chưa có bản dịch hoặc chưa có file audio, hệ thống sẽ tự động tiến hành dịch CẢ "Tên POI" và "Mô tả", đồng thời tạo audio (gọi script Python `translate.py` và `tts.py`).
   - **UX Loading:** Trong quá trình dịch thuật và sinh audio, giao diện hiển thị thông báo tiến độ hoàn thành ở bên dưới. Khi quá trình hoàn tất, hiển thị nội dung, file audio cùng các nút thao tác.
 
 **Action buttons trong modal:**
@@ -559,8 +561,8 @@ Click "+ Thêm POI" → Form thêm POI:
 
 Giống quy luật của Admin, cửa sổ sửa POI cho Doanh nghiệp cho sửa: Tên, Mô tả, Kinh độ, Vĩ độ, Range, Ảnh (xóa đi/thêm vào ≤ 5).
 **Sau khi submit (Trigger logic như Admin):** 
-1. `PUT /api/business/pois/:id`. Server định danh `new_version = old_version + 1`.
-2. Hủy bỏ triệt để file audio cũ của mọi ngôn ngữ và các bản dịch đang nằm trên DB/Server.
+1. `PUT /api/business/pois/:id`.
+2. **Nếu thay đổi Tên HOẶC Mô tả:** Tương tự logic Admin, hệ thống định danh `new_version = old_version + 1`, hủy toàn bộ file audio cũ và **xóa toàn bộ các bản dịch hiện có** trên DB vì nội dung phần chữ đã bị thay đổi gốc.
 3. Sinh lại audio Tiếng Việt dưới định dạng tên file gia tăng tiến trình: `poi_{id}_vi_v{new_version}.mp3`
 4. Cập nhật record phiên bản vào `poi_audio_files` làm tham chiếu cho App thiết bị.
 
@@ -599,9 +601,9 @@ Giống quy luật của Admin, cửa sổ sửa POI cho Doanh nghiệp cho sử
 1. Nếu là đăng nhập mới: `POST /api/auth/user/login` với `{ email, password, language_code }`. Lưu JWT token + `language_code` vào storage.
 2. **Background job (Session Init - Thực hiện DUY NHẤT 1 LẦN):**
    - **Sync Version:** Gửi danh sách POI ID/Version hiện băm ở Local Cache lên Server (hoặc lấy danh sách POI gần nhất từ Server kèm Version mới nhất). Thực hiện đối chiếu toàn diện: Nếu `local_version` < `server_version`, đánh dấu cần xóa/tải lại.
-   - **Dịch thuật:** Truy vấn tất cả POI trong bán kính 20km. Với mỗi POI: kiểm tra/tạo bản dịch `language_code` nếu chưa có.
+   - **Dịch thuật:** Truy vấn tất cả POI trong bán kính 20km. **ĐẶC BIỆT BỔ SUNG:** Dịch luôn cả các POI nằm ngoài phạm vi 20km, NẾU các POI đó nằm trong một Tour có ít nhất 1 POI nằm trong bán kính 20km. Với mỗi POI: kiểm tra/tạo bản dịch (áp dụng cho CẢ `name` và `description`) cho `language_code` đang thiết lập nếu chưa có.
    - **Tour:** Tương tự cho các Tour trong phạm vi 20km.
-3. **UX:** Hiển thị loading indicator "Đang đồng bộ dữ liệu..."
+3. **UX (Quy tắc hiển thị):** Hệ thống bắt buộc hiển thị màn hình chờ "Đang đồng bộ dữ liệu..." và **CHỈ BẮT ĐẦU HIỂN THỊ** màn hình chính / danh sách POI (với tên và mô tả đã được dịch) **SAU KHI** tiến trình dịch thuật này hoàn tất 100%.
 4. Sau khi hoàn thành → Vào màn hình chính. Kể từ lúc này, hệ thống **tin tưởng hoàn toàn** vào dữ liệu cache đã đồng bộ, không thực hiện kiểm tra lại version trong suốt session để tiết kiệm băng thông.
 
 ### 7.3 Màn hình chính User
@@ -665,13 +667,12 @@ Khi nhấn "Đổi ngôn ngữ":
 - Tên Tour (theo ngôn ngữ)
 - Mô tả (theo ngôn ngữ — lấy từ `tour_translations` hoặc mô tả gốc nếu chưa dịch)
 - Ảnh (thumbnail grid)
-- Danh sách POI trong tour (theo thứ tự): số thứ tự + tên POI (theo ngôn ngữ)
+- Danh sách POI trong tour (theo thứ tự): số thứ tự + tên POI đã dịch (BẮT BUỘC dùng `translated_name` theo ngôn ngữ user, chỉ fallback về gốc nếu trống)
 
 **Khi nhấn vào 1 POI trong danh sách:**
 
-1. Chuyển sang Tab Bản đồ
-2. Bản đồ pan đến vị trí POI, highlight chấm POI
-3. Mở Popup Modal thông tin POI (xem chi tiết ở 7.4.2)
+1. **Hệ thống KHÔNG tự động chuyển sang Tab Bản đồ.**
+2. **Mở trực tiếp "Popup Modal chi tiết POI" ngay tại màn hình hiện tại (Tab Thông tin). Điều này giúp người dùng xem nhanh thông tin điểm đến mà không bị mất dấu danh sách Tour đang xem.**
 
 **Nút "Xem trên bản đồ":** Chuyển sang Tab Bản đồ, highlight tất cả POI trong tour (đánh số), POI khác vẫn hiển thị bình thường.
 
@@ -679,22 +680,25 @@ Khi nhấn "Đổi ngôn ngữ":
 
 #### 7.4.2 Màn hình danh sách POI gần đây
 
-- Thanh tìm kiếm (theo tên POI, ngôn ngữ hiện tại)
-- Danh sách POI: tên + khoảng cách
+- Thanh tìm kiếm (theo tên POI, ưu tiên tìm trên cả tên dịch và tên gốc)
+- Danh sách POI: tên POI đã dịch (`translated_name` theo ngôn ngữ user, chỉ fallback về gốc nếu trống) + khoảng cách
 
 **Nhấn vào 1 POI:**
 
-1. Chuyển sang Tab Bản đồ
-2. Pan đến POI, highlight
-3. Mở **Popup Modal chi tiết POI**:
-   - Chỉ hiển thị thông tin POI (tên, mô tả) theo đúng ngôn ngữ mà User đang chọn sử dụng. Không hiển thị mô tả gốc (nếu là ngôn ngữ khác) hoặc các ngôn ngữ khác ngoài ngôn ngữ user đang chọn.
+1. **Hệ thống KHÔNG chuyển sang Tab Bản đồ.**
+2. **Mở trực tiếp "Popup Modal chi tiết POI" ngay tại màn hình hiện tại (Tab Thông tin).**
+3. **Nội dung Popup Modal chi tiết POI:**
+   - **Tiêu đề & Mô tả:** BẮT BUỘC hiển thị Tên POI (`translated_name`) và Mô tả (`translated_description`) theo đúng ngôn ngữ mà User đang chọn sử dụng. Không hiển thị nội dung tiếng Việt gốc nếu user đang chọn ngôn ngữ khác. (Nếu API trả về chưa có bản dịch, mới fallback dùng nội dung gốc).
    - Kinh độ, Vĩ độ, Phạm vi.
    - Ảnh (thumbnail, click xem full).
+   - **Bổ sung Action button (hoặc Icon) "Xem trên bản đồ":**
+     - **Vị trí: Đặt tại thanh tiêu đề hoặc khu vực Action bar của Modal.**
+     - **Hành vi: Khi nhấn vào nút này, hệ thống mới thực hiện chuyển Tab sang "Bản đồ", đồng thời tự động dịch chuyển (pan) vùng nhìn đến vị trí POI và highlight chấm POI đó.**
    - **Khu vực Audio theo ngôn ngữ đã chọn:**
      - **Trường hợp 1 (Audio đã có sẵn):** Nếu file audio của ngôn ngữ đó ĐÃ TỒN TẠI trên server → Hiển thị 2 nút: "Nghe trực tuyến" (Play stream) và "Tải xuống" (Download để nghe offline).
-     - **Trường hợp 2 (Audio chưa có):** Nếu file audio CHƯA TỒN TẠI → Hiển thị nút "Tạo Audio" (Create). 
-       - Hành vi nút "Tạo Audio": Khi User nhấn tạo, hệ thống hiển thị trạng thái đang xử lý và tiến hành khởi tạo audio trên server cho đúng ngôn ngữ đó. Khi tạo xong, giao diện sẽ cập nhật lại thành Trường hợp 1 (hiển thị 2 lựa chọn: "Nghe trực tuyến" và "Tải xuống").
-       - **Lưu ý tự động:** Tuy nhiên, ngay cả khi user chưa bấm nút Tạo Audio, nếu User tiến đến gần POI trong một khoảng cách nhất định (phạm vi range + 100m) thì hệ thống vẫn sẽ tiến hành tạo audio tự động dựa theo mô tả đã có.
+     - **Trường hợp 2 (Audio chưa có):** Nếu file audio CHƯA TỒN TẠI trên server → Hệ thống sẽ **TỰ ĐỘNG trigger tiến trình sinh Audio trên server ngay lập tức** (không cần người dùng bấm nút tạo). 
+       - Trong lúc đang xử lý, giao diện hiển thị trạng thái "Đang tạo âm thanh...".
+       - Khi tiến trình sinh Audio hoàn tất, giao diện sẽ tự động cập nhật lại thành Trường hợp 1 (hiển thị 2 lựa chọn: "Nghe trực tuyến" và "Tải xuống").
 
 ---
 
@@ -916,7 +920,7 @@ if __name__ == "__main__":
 | BR-01 | POI không thể xóa nếu đang nằm trong ít nhất 1 Tour (Admin hoặc User). Áp dụng cho cả Admin và Doanh nghiệp.                                      |
 | BR-02 | Mô tả POI là bắt buộc (không được để trống) vì dùng để tạo audio TTS.                                                                             |
 | BR-03 | Khi thêm mới POI → ngay lập tức tạo audio tiếng Việt (`vi_v0`).                                                                                   |
-| BR-04 | **Version Audio (Cache Invalidation):** Khi nội dung của một POI bị thay đổi, hệ thống **bắt buộc phải tăng (increment +1)** tham số `version`. Server sẽ xóa file cũ và tạo lại bản mới. App người dùng sử dụng chỉ số này để xóa cache cũ; tuy nhiên, việc kiểm tra và đối chiếu version này **CHỈ thực hiện DUY NHẤT 1 LẦN** khi người dùng vừa khởi động ứng dụng hoặc đăng nhập (Session Init). Toàn bộ quá trình sử dụng sau đó (di chuyển, bật/tắt audio) hệ thống sẽ mặc định tin tưởng Cache local để tối ưu hóa băng thông. |
+| BR-04 | **Version Audio (Cache Invalidation):** Khi một phần nội dung của POI ("Tên POI" HOẶC "Mô tả") bị thay đổi, hệ thống **bắt buộc phải xóa toàn bộ bản dịch hiện có của các ngôn ngữ** (do nội dung gốc đã sai lệch) và **tăng (increment +1)** tham số `version`. Server sẽ xóa file cũ và tạo lại bản mới gốc. App người dùng sử dụng chỉ số này để xóa cache cũ; tuy nhiên, việc kiểm tra và đối chiếu version này **CHỈ thực hiện DUY NHẤT 1 LẦN** khi người dùng vừa khởi động ứng dụng hoặc đăng nhập (Session Init). Toàn bộ quá trình sử dụng sau đó (di chuyển, bật/tắt audio) hệ thống sẽ mặc định tin tưởng Cache local để tối ưu hóa băng thông. |
 | BR-05 | Khi xóa POI → xóa toàn bộ file audio + bản dịch + ảnh liên quan.                                                                                  |
 | BR-06 | Admin không thể sửa POI của Doanh nghiệp. Chỉ có thể xem và xóa (khi POI không trong tour).                                                       |
 | BR-07 | Doanh nghiệp không thể xóa POI của doanh nghiệp khác, không nhìn thấy POI của doanh nghiệp khác.                                                  |
@@ -1015,7 +1019,8 @@ CREATE TABLE IF NOT EXISTS poi_translations (
   id                    INTEGER PRIMARY KEY AUTOINCREMENT,
   poi_id                INTEGER NOT NULL,
   language_code         TEXT    NOT NULL,   -- 'en', 'zh', 'ja', 'ko', ...
-  translated_description TEXT   NOT NULL,
+  translated_name       TEXT,               -- Tên POI đã dịch (NULL nếu chưa có)
+  translated_description TEXT   NOT NULL,   -- Background job sẽ dịch cả name và description
   created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(poi_id, language_code),
   FOREIGN KEY (poi_id) REFERENCES pois(id) ON DELETE CASCADE
@@ -1161,7 +1166,7 @@ GET /api/admin/pois
          owner_type: string, owner_id: number,
          images: [{ id: number, file_path: string }],
          audio_files: [{ language_code: string, version: number, file_path: string }],
-         translations: [{ language_code: string, translated_description: string }] 
+         translations: [{ language_code: string, translated_name: string, translated_description: string }] 
        }]
 
 POST /api/admin/pois
@@ -1298,7 +1303,8 @@ GET /api/business/pois
   Query: ?search=<text> 
   200: [{ 
          id: number, name: string, description: string, lat: number, lng: number, range_m: number,
-         images: [...], audio_files: [...], translations: [...] 
+         images: [...], audio_files: [...], 
+         translations: [{ language_code: string, translated_name: string, translated_description: string }] 
        }]
   -- Ghi chú: Chỉ lọc/trả về đúng các POI thuộc về Business đang gửi Request.
 
@@ -1342,12 +1348,13 @@ GET /api/user/pois/nearby
     - radius: number (bán kính theo mét, default 20000)
     - search: string (tùy chọn, chuỗi không dấu/có dấu)
   200: [{ 
-         id: number, name: string, description_localized: string, lat: number, lng: number, range_m: number,
-         images: [...], audio_version: number, distance_m: number 
+         id: number, name: string, description: string, lat: number, lng: number, range_m: number,
+         images: [...], audio_version: number, distance_m: number,
+         translations: [{ language_code: string, translated_name: string, translated_description: string }] 
        }]
   -- Ghi chú: 
      - Trả về `audio_version` mới nhất từ Database theo ngôn ngữ của hệ thống để App kiểm tra Cache.
-     - `description_localized`: Tự động map từ POI_Translations (nếu đã có bản dịch), ngược lại fallback về chuỗi rỗng để chọc trigger dịch thủ công.
+     - `translations`: Chứa tên và mô tả đã dịch. App sẽ map từ mảng này (nếu đã có bản dịch) dựa theo language_code, ngược lại fallback về chuỗi gốc (`name`, `description`) để chọc trigger dịch thủ công.
 
 GET /api/user/tours/nearby
   Method: GET

@@ -3,6 +3,8 @@ import { X, Map, Trash2, Edit3, ChevronRight, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { POIWithDistance } from "../hooks/useUserGPS";
 import { apiService } from "../../../services/api";
+import { useState } from "react";
+import { UserPoiModal } from "./UserPoiModal";
 
 interface UserTourDetailProps {
   tour: Tour;
@@ -24,6 +26,8 @@ export function UserTourDetail({
   onEdit
 }: UserTourDetailProps) {
   const navigate = useNavigate();
+  const [selectedPoi, setSelectedPoi] = useState<POIWithDistance | null>(null);
+  const lang = localStorage.getItem("user_lang") || "vi";
 
   const handleViewOnMap = () => {
     setHighlightedTour(tour);
@@ -34,10 +38,8 @@ export function UserTourDetail({
   const handlePoiClick = (poiId: number) => {
     const poi = nearbyPOIs.find(p => p.id === poiId);
     if (poi) {
-      setHighlightedTour(tour);
-      setMapFocusPoi(poi);
-      navigate("/user/map");
-      onClose();
+      // Mở Modal tại chỗ, KHÔNG nhảy sang Map
+      setSelectedPoi(poi);
     }
   };
 
@@ -82,22 +84,27 @@ export function UserTourDetail({
         <div className="flex-1 overflow-y-auto p-6 pt-4">
           <h3 className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em] mb-4">Lộ trình của tôi</h3>
           <div className="space-y-4">
-            {tour.pois?.sort((a, b) => a.position - b.position).map((tp) => (
-              <div 
-                key={tp.poi_id}
-                onClick={() => handlePoiClick(tp.poi_id)}
-                className="group flex items-center gap-4 p-3 rounded-2xl border border-gray-100 bg-white hover:border-blue-100 hover:shadow-sm active:scale-95 transition-all cursor-pointer"
-              >
-                <div className="w-8 h-8 shrink-0 bg-blue-100 text-blue-700 rounded-lg flex items-center justify-center font-bold text-sm shadow-sm group-hover:bg-blue-600 group-hover:text-white transition-all">
-                  {tp.position}
+            {tour.pois?.sort((a, b) => a.position - b.position).map((tp) => {
+              const fullPoi = nearbyPOIs.find(p => p.id === tp.poi_id);
+              const displayName = fullPoi?.translations?.find(t => t.language_code === lang)?.translated_name
+                || tp.name;
+              return (
+                <div 
+                  key={tp.poi_id}
+                  onClick={() => handlePoiClick(tp.poi_id)}
+                  className="group flex items-center gap-4 p-3 rounded-2xl border border-gray-100 bg-white hover:border-blue-100 hover:shadow-sm active:scale-95 transition-all cursor-pointer"
+                >
+                  <div className="w-8 h-8 shrink-0 bg-blue-100 text-blue-700 rounded-lg flex items-center justify-center font-bold text-sm shadow-sm group-hover:bg-blue-600 group-hover:text-white transition-all">
+                    {tp.position}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-bold text-gray-700 text-sm truncate">{displayName}</h4>
+                    <p className="text-[10px] text-gray-400 font-medium">Nhấn để xem chi tiết</p>
+                  </div>
+                  <ChevronRight size={14} className="text-gray-300" />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-bold text-gray-700 text-sm truncate">{tp.name}</h4>
-                  <p className="text-[10px] text-gray-400 font-medium">Bấm để định vị trên bản đồ</p>
-                </div>
-                <ChevronRight size={14} className="text-gray-300" />
-              </div>
-            ))}
+              );
+            })}
           </div>
           
           {(!tour.pois || tour.pois.length === 0) && (
@@ -130,6 +137,9 @@ export function UserTourDetail({
           </div>
         </div>
       </div>
+
+      {/* POI Detail Modal (mở tại chỗ, không nhảy Map) */}
+      {selectedPoi && <UserPoiModal poi={selectedPoi} onClose={() => setSelectedPoi(null)} />}
     </div>
   );
 }

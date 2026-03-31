@@ -117,6 +117,7 @@ db.exec(`
     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
     poi_id                 INTEGER NOT NULL,
     language_code          TEXT    NOT NULL,
+    translated_name        TEXT,
     translated_description TEXT    NOT NULL,
     created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(poi_id, language_code),
@@ -196,6 +197,16 @@ async function seedAdmin() {
       "Admin"
     );
     console.log(`[SEED] Admin account created: ${ADMIN_EMAIL}`);
+  }
+  // Migration: thêm cột translated_name nếu chưa tồn tại
+  try {
+    db.exec(`ALTER TABLE poi_translations ADD COLUMN translated_name TEXT`);
+    console.log("[MIGRATION] Added column translated_name to poi_translations");
+  } catch (e: any) {
+    // Ignore if already exists
+    if (!e.message?.includes("duplicate column")) {
+      // truly unexpected
+    }
   }
 }
 
@@ -529,6 +540,107 @@ async function startServer() {
     }
   });
 
+  // POST /api/user/session-init — Dịch thuật ngầm (Session Init Background Job)
+  // Dịch cả name + description cho:
+  //   1. Tất cả POI trong bán kính 20km (lat/lng được gửi từ client)
+  //   2. POI nằm ngoài 20km nhưng thuộc Tour có ít nhất 1 POI trong 20km
+  app.post("/api/user/session-init", userAuth, async (req: any, res) => {
+    try {
+      const { language_code, lat, lng } = req.body;
+      if (!language_code || language_code === "vi") {
+        return res.json({ success: true, translated: 0, message: "Tiếng Việt không cần dịch" });
+      }
+      if (!lat || !lng) {
+        return res.status(400).json({ error: "Thiếu tọa độ lat/lng" });
+      }
+
+      const userLat = parseFloat(lat);
+      const userLng = parseFloat(lng);
+      const RADIUS_M = 20000; // 20km
+
+      // Hàm Haversine tính khoảng cách (metres)
+      const haversine = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+        const R = 6371000;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      };
+
+      const allPois = db.prepare("SELECT * FROM pois").all() as any[];
+      
+      // Bước 1: Phân loại POI trong / ngoài 20km
+      const nearbyPoiIds = new Set<number>();
+      for (const p of allPois) {
+        if (haversine(userLat, userLng, p.lat, p.lng) <= RADIUS_M) {
+          nearbyPoiIds.add(p.id);
+        }
+      }
+
+      // Bước 2: Tìm các Tour có ít nhất 1 POI trong 20km
+      // Lấy tất cả POI ID thuộc tour lân cận (có thể ngoài 20km)
+      const extraPoiIds = new Set<number>();
+      if (nearbyPoiIds.size > 0) {
+        const nearbyIdList = [...nearbyPoiIds].join(",");
+        const tourPoiRows = db.prepare(`
+          SELECT DISTINCT tp2.poi_id
+          FROM tour_pois tp1
+          JOIN tour_pois tp2 ON tp1.tour_id = tp2.tour_id
+          WHERE tp1.poi_id IN (${nearbyIdList})
+            AND tp2.poi_id NOT IN (${nearbyIdList})
+        `).all() as any[];
+        for (const row of tourPoiRows) {
+          extraPoiIds.add(row.poi_id);
+        }
+      }
+
+      // Tập hợp đầy đủ cần dịch
+      const allTargetIds = new Set([...nearbyPoiIds, ...extraPoiIds]);
+      const transLang = language_code === "zh" ? "zh-CN" : language_code;
+
+      const langRow = db.prepare("SELECT tts_voice FROM languages WHERE code=?").get(language_code) as any;
+      if (!langRow) return res.status(400).json({ error: "Ngôn ngữ không được hỗ trợ" });
+
+      let translated = 0;
+      for (const poiId of allTargetIds) {
+        const existing = db.prepare(
+          "SELECT id FROM poi_translations WHERE poi_id=? AND language_code=?"
+        ).get(poiId, language_code) as any;
+
+        if (!existing) {
+          const poi = allPois.find(p => p.id === poiId);
+          if (!poi) continue;
+          try {
+            const [translatedDesc, translatedName] = await Promise.all([
+              runPythonScript("translate.py", ["--text", poi.description, "--lang", transLang]),
+              runPythonScript("translate.py", ["--text", poi.name, "--lang", transLang]),
+            ]);
+            db.prepare(
+              "INSERT INTO poi_translations (poi_id, language_code, translated_name, translated_description) VALUES (?, ?, ?, ?)"
+            ).run(poiId, language_code, translatedName, translatedDesc);
+            translated++;
+          } catch (e) {
+            console.error(`[Session Init] Lỗi dịch POI ${poiId}:`, e);
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        translated,
+        nearby_count: nearbyPoiIds.size,
+        extra_tour_count: extraPoiIds.size,
+        message: `Đã dịch ${translated} POI mới cho ngôn ngữ ${language_code}`
+      });
+    } catch (e) {
+      console.error("POST /api/user/session-init:", e);
+      res.status(500).json({ error: "Lỗi Session Init" });
+    }
+  });
+
+
   app.get("/api/user/tours", (req, res) => {
     try {
       let userId: number | null = null;
@@ -682,18 +794,24 @@ async function startServer() {
       if (!langRow) return res.status(400).json({ error: "Ngôn ngữ không được hỗ trợ" });
       const ttsVoice = langRow.tts_voice;
 
-      let translatedText = poi.description;
+      let translatedDescription = poi.description;
+      let translatedName = poi.name;
 
       if (language_code !== "vi") {
         const existingTrans = db.prepare("SELECT * FROM poi_translations WHERE poi_id=? AND language_code=?").get(poi_id, language_code) as any;
         if (existingTrans) {
-          translatedText = existingTrans.translated_description;
+          translatedDescription = existingTrans.translated_description;
+          translatedName = existingTrans.translated_name || poi.name;
         } else {
           // deep_translator requires EXACTLY zh-CN for Chinese. For others, language_code is enough.
           const transLang = language_code === "zh" ? "zh-CN" : language_code;
-          translatedText = await runPythonScript("translate.py", ["--text", poi.description, "--lang", transLang]);
-          db.prepare("INSERT INTO poi_translations (poi_id, language_code, translated_description) VALUES (?, ?, ?)")
-            .run(poi_id, language_code, translatedText);
+          // Dịch cả name và description
+          [translatedDescription, translatedName] = await Promise.all([
+            runPythonScript("translate.py", ["--text", poi.description, "--lang", transLang]),
+            runPythonScript("translate.py", ["--text", poi.name, "--lang", transLang]),
+          ]);
+          db.prepare("INSERT INTO poi_translations (poi_id, language_code, translated_name, translated_description) VALUES (?, ?, ?, ?)")
+            .run(poi_id, language_code, translatedName, translatedDescription);
         }
       }
 
@@ -705,14 +823,15 @@ async function startServer() {
       if (existingAudio) {
         return res.json({ 
           success: true, already_existed: true, file_path: existingAudio.file_path, 
-          translated_description: translatedText, audio_version: useVersion 
+          translated_name: translatedName, translated_description: translatedDescription,
+          audio_version: useVersion 
         });
       }
 
       const fileName = `poi_${poi_id}_${language_code}_v${useVersion}.mp3`;
       const absolutePath = path.join(audioDir, fileName);
 
-      await runPythonScript("tts.py", ["--text", translatedText, "--voice", ttsVoice, "--output", absolutePath]);
+      await runPythonScript("tts.py", ["--text", translatedDescription, "--voice", ttsVoice, "--output", absolutePath]);
 
       const publicFilePath = `/uploads/audio/${fileName}`;
       db.prepare("INSERT INTO poi_audio_files (poi_id, language_code, version, file_path) VALUES (?, ?, ?, ?)")
@@ -720,7 +839,8 @@ async function startServer() {
 
       res.json({
         success: true, already_existed: false, file_path: publicFilePath,
-        translated_description: translatedText, audio_version: useVersion
+        translated_name: translatedName, translated_description: translatedDescription,
+        audio_version: useVersion
       });
     } catch (err) {
       console.error("POST /api/audio/generate:", err);
@@ -1375,42 +1495,22 @@ app.delete("/api/business/pois/:id", businessAuth, (req: any, res) => {
   }
 });
 
-function getLocalIp() {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]!) {
-      // Kiểm tra IPv4 và không phải là card mạng ảo/nội bộ
-      if (iface.family === "IPv4" && !iface.internal) {
-        return iface.address;
-      }
-    }
-  }
-  return "localhost";
-}
 // ── SPA fallback ──────────────────────────────────────────────────────────
   app.use(express.static(path.join(__dirname, "dist")));
   app.get("*", (_req, res) => {
     res.sendFile(path.join(__dirname, "dist", "index.html"));
   });
+// --- PHẦN CUỐI FILE SERVER.TS (LOCAL ONLY) ---
 
-  // ── Khởi chạy Server và hiện QR ───────────────────────────────────────────
-app.listen(PORT, "0.0.0.0", () => {
-  // const localIp = getLocalIp();
-  // // CHÚ Ý: Đổi PORT ở đây thành 5173 để điện thoại vào đúng server Vite
-  // const FRONTEND_URL = `http://${localIp}:5173/app`; 
+// Chỉ khai báo PORT một lần duy nhất
 
-  // console.log("\n" + "=".repeat(50));
-  // console.log(`📱 QUÉT MÃ QR ĐỂ MỞ APP USER (CỔNG 5173)`);
-  // console.log(`🔗 Link: ${FRONTEND_URL}`);
-  
-  // Hiện mã QR trỏ thẳng về cổng 5173
-  // qrcode.generate(FRONTEND_URL, { small: true });
-  // Sửa lại đoạn này
-const NGROK_URL = "https://unbribable-jettingly-winifred.ngrok-free.dev"; // Dán cái link ngrok bạn vừa lấy được vào đây
-qrcode.generate(NGROK_URL, { small: true });
-  
-  console.log("=".repeat(50) + "\n");
+app.listen(PORT, () => {
+  console.log("\n" + "=".repeat(50));
+  console.log(`🚀 SERVER ĐANG CHẠY TẠI: http://localhost:${PORT}`);
+  console.log("=".repeat(50));
 });
+
+// Đảm bảo không còn hàm startServer() hay app.listen nào khác ở dưới dòng này.
 } // <--- Dấu ngoặc này đóng hàm startServer
 
 // Chạy hàm khởi tạo

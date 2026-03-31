@@ -19,6 +19,7 @@ export interface POITranslation {
   id: number;
   poi_id: number;
   language_code: string;
+  translated_name: string;
   translated_description: string;
 }
 

@@ -37,38 +37,40 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'GPS Tourism App',
-        short_name: 'GPSTour',
-        description: 'Bản đồ du lịch tương tác đa ngôn ngữ',
-        theme_color: '#10b981', // Màu emerald cho chuyên nghiệp
+        name: 'Tour ẩm thực - GPS Tourism',
+        short_name: 'FoodTour',
+        description: 'Ứng dụng khám phá tour ẩm thực dựa trên GPS',
+        theme_color: '#10b981',
         background_color: '#ffffff',
         display: 'standalone',
-        start_url: '/app',
+        start_url: '/user',
         icons: [
           {
-            src: '/vite.svg',
+            src: '/pwa-192x192.png',
             sizes: '192x192',
-            type: 'image/svg+xml',
+            type: 'image/png',
             purpose: 'any maskable'
           },
-          // Lưu ý: Để hiện nút "Install" trên Android, bạn nên có thêm 1 file .png 512x512 trong thư mục public
+          {
+            src: '/pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any maskable'
+          }
         ]
       }
+
     })
   ],
+// ... các phần plugins giữ nguyên
+
 server: {
-    // Cho phép tất cả các host từ ngrok truy cập
-    allowedHosts: [
-      'unbribable-jettingly-winifred.ngrok-free.dev', 
-      '.ngrok-free.dev', // Cho phép tất cả subdomain của ngrok
-      'all'
-    ],
-    host: true, 
+    host: 'localhost', 
     port: 5173,
-    strictPort: true, // Giữ cố định cổng 5173
+    strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:3000', // Trỏ về localhost thay vì IP
         changeOrigin: true,
       },
       '/uploads': {
@@ -76,4 +78,5 @@ server: {
         changeOrigin: true,
       }
     }
-  }});
+}
+});

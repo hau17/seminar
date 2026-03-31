@@ -49,6 +49,20 @@ export function InfoTab() {
   };
   const lang = localStorage.getItem("user_lang") || "vi";
 
+  // Helper: lấy tên POI theo ngôn ngữ hiện tại
+  const getPoiName = (poi: POIWithDistance): string => {
+    if (lang === "vi") return poi.name;
+    const t = poi.translations?.find(t => t.language_code === lang);
+    return t?.translated_name || poi.name;
+  };
+
+  // Helper: lấy mô tả POI theo ngôn ngữ hiện tại  
+  const getPoiDescription = (poi: POIWithDistance): string => {
+    if (lang === "vi") return poi.description;
+    const t = poi.translations?.find(t => t.language_code === lang);
+    return t?.translated_description || poi.description;
+  };
+
   // Section 2: Tour đề xuất (Tours by Admin within 20km)
   const suggestedTours = useMemo(() => 
     nearbyTours.filter(t => t.created_by_type === "admin"), 
@@ -152,8 +166,8 @@ export function InfoTab() {
                 })()}
               </div>
               <div className="flex-1 min-w-0 pr-2">
-                <h3 className="font-bold text-gray-800 text-sm truncate">{poi.name}</h3>
-                <p className="text-xs text-gray-500 line-clamp-1 mt-0.5">{poi.description}</p>
+                <h3 className="font-bold text-gray-800 text-sm truncate">{getPoiName(poi)}</h3>
+                <p className="text-xs text-gray-500 line-clamp-1 mt-0.5">{getPoiDescription(poi)}</p>
                 <div className="flex items-center gap-2 mt-1">
                    <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
                       {Math.round(poi.distance)}m
