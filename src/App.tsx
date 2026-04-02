@@ -5,6 +5,7 @@ import {
   Route,
   Navigate,
 } from "react-router-dom";
+import { Toaster } from "react-hot-toast";
 import { AdminDashboard } from "./features/admin/AdminDashboard";
 import { BusinessAuth } from "./features/auth/BusinessAuth";
 import { BusinessDashboard } from "./features/business/BusinessDashboard";
@@ -19,6 +20,31 @@ import { MapTab } from "./features/user/tabs/MapTab";
 export default function App() {
   return (
     <Router>
+      {/*
+        Toaster phải nằm bên trong Router để dùng được useNavigate trong toast actions.
+        Đặt ở đây đảm bảo nó luôn mount dù ở route nào.
+      */}
+      <Toaster
+        position="top-center"
+        toastOptions={{
+          duration: 4000,
+          style: {
+            borderRadius: "12px",
+            padding: "12px 16px",
+            fontSize: "14px",
+            fontWeight: "600",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+          },
+          success: {
+            style: { background: "#f0fdf4", color: "#15803d", border: "1px solid #bbf7d0" },
+            iconTheme: { primary: "#16a34a", secondary: "#f0fdf4" },
+          },
+          error: {
+            style: { background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca" },
+            iconTheme: { primary: "#dc2626", secondary: "#fef2f2" },
+          },
+        }}
+      />
       <Routes>
         {/* Admin Routes */}
         <Route path="/admin" element={<AdminDashboard />} />

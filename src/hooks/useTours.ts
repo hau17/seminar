@@ -99,5 +99,22 @@ export const useTours = (token: string | null) => {
     [token, fetchTours] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  return { tours, setTours, loading, fetchTours, saveTour, deleteTour };
+  const translateTour = useCallback(
+    async (tourId: number, langCode: string) => {
+      const res = await fetch("/api/tours/translate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
+        body: JSON.stringify({ tour_id: tourId, language_code: langCode }),
+      });
+      if (!res.ok) throw new Error("Chưa thể dịch Tour lúc này");
+      const json = await res.json();
+      return json; // { translated_name, translated_description }
+    },
+    [token] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  return { tours, setTours, loading, fetchTours, saveTour, deleteTour, translateTour };
 };

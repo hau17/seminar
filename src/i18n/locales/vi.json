@@ -1,0 +1,39 @@
+{
+  "login": {
+    "title": "Đăng Nhập Khách",
+    "email": "Email",
+    "password": "Mật khẩu",
+    "language": "Ngôn ngữ hiển thị & Audio",
+    "submit": "Đăng nhập",
+    "submitting": "Đang đăng nhập...",
+    "no_account": "Chưa có tài khoản?",
+    "register_now": "Đăng ký ngay"
+  },
+  "info": {
+    "current_lang": "Ngôn ngữ hiện tại",
+    "change": "Thay đổi",
+    "suggested_tours": "Tour gần bạn (Đề xuất)",
+    "nearby_pois": "Điểm tham quan gần bạn",
+    "my_tours": "Tour của tôi",
+    "add_tour": "+ Thêm Tour",
+    "no_suggested_tours": "Không có tour đề xuất nào gần đây.",
+    "finding_pois": "Đang tìm địa điểm quanh đây...",
+    "no_user_tours": "Bạn chưa có tour nào.",
+    "create_tour_now": "Tạo tour ngay!",
+    "stops": "điểm dừng",
+    "attractions": "điểm tham quan"
+  },
+  "layout": {
+    "title": "GPS Tour Guide",
+    "tabs": {
+      "info": "Thông tin",
+      "map": "Bản đồ"
+    },
+    "sync": {
+      "loading": "Đang tải dữ liệu...",
+      "cache": "Đang đồng bộ cache...",
+      "lang": "Đang đồng bộ ngôn ngữ...",
+      "preparing": "Hệ thống đang chuẩn bị nội dung theo ngôn ngữ của bạn. Vui lòng chờ một chút..."
+    }
+  }
+}

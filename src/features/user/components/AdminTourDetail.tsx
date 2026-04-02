@@ -37,6 +37,14 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
   // Hierarchical Thumbnail logic for header (Tour Image > First POI Image > Placeholder)
   const tourImage = tour.images?.[0]?.file_path;
   const poiImage = (tour as any).pois?.[0]?.images?.[0]?.file_path;
+  // Translations (Ưu tiên các field đã được Backend làm phẳng)
+  const translatedName = tour.translated_name 
+    || tour.translations?.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.translated_name 
+    || tour.name;
+  const translatedDescription = tour.translated_description
+    || tour.translations?.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.translated_description 
+    || tour.description 
+    || "Chưa có mô tả cho tour này.";
   const headerThumbnail = tourImage || poiImage;
 
   return (
@@ -49,7 +57,7 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
           {/* Header Image/Banner */}
           <div className="relative h-48 shrink-0 bg-gray-200">
             {headerThumbnail ? (
-              <img src={headerThumbnail} alt={tour.name} className="w-full h-full object-cover" />
+              <img src={headerThumbnail} alt={translatedName} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-400">
                 <Navigation size={48} />
@@ -59,7 +67,7 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
               <X size={20} className="text-gray-800" />
             </button>
             <div className="absolute bottom-0 left-0 w-full p-6 bg-gradient-to-t from-black/80 to-transparent">
-              <h2 className="text-2xl font-bold text-white leading-tight">{tour.name}</h2>
+              <h2 className="text-2xl font-bold text-white leading-tight">{translatedName}</h2>
             </div>
           </div>
 
@@ -71,7 +79,7 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
                 <Info size={16} /> Chi tiết hành trình
               </h3>
               <p className="text-gray-600 text-sm leading-relaxed bg-blue-50/50 p-3 rounded-xl border border-blue-100">
-                {tour.description || "Chưa có mô tả cho tour này."}
+                {translatedDescription}
               </p>
             </section>
 

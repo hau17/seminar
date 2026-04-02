@@ -1,82 +1,88 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig({
-  plugins: [
-    react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      injectRegister: 'auto',
-      workbox: {
-        // Cache các file tĩnh trong thư mục dist
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,mp3}'],
-        // Cấu hình quan trọng để lưu Audio và Ảnh từ Backend (cổng 3000)
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) => url.pathname.startsWith('/uploads'),
-            handler: 'CacheFirst', // Ưu tiên lấy từ bộ nhớ đệm trước
-            options: {
-              cacheName: 'media-assets-cache',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24 * 30, // Lưu trong 30 ngày
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
+export default defineConfig(({ mode }) => {
+  // Load các biến môi trường từ file .env tương ứng với mode (dev hoặc demo)
+  // Nếu không tìm thấy link trong file .env, nó sẽ mặc định dùng localhost:3000
+  const env = loadEnv(mode, process.cwd());
+  const API_TARGET = env.VITE_API_TARGET || 'http://localhost:3000';
+
+  return {
+    plugins: [
+      react(),
+      VitePWA({
+        registerType: 'autoUpdate',
+        injectRegister: 'auto',
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,mp3}'],
+          runtimeCaching: [
+            {
+              urlPattern: ({ url }) => url.pathname.startsWith('/uploads'),
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'media-assets-cache',
+                expiration: {
+                  maxEntries: 100,
+                  maxAgeSeconds: 60 * 60 * 24 * 30,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
               },
             },
-          },
-          {
-            urlPattern: ({ url }) => url.pathname.startsWith('/api'),
-            handler: 'NetworkFirst', // Ưu tiên mạng, nếu mất mạng thì lấy bản cũ trong cache
-            options: {
-              cacheName: 'api-data-cache',
+            {
+              urlPattern: ({ url }) => url.pathname.startsWith('/api'),
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'api-data-cache',
+              },
             },
-          },
-        ],
-      },
-      manifest: {
-        name: 'Tour ẩm thực - GPS Tourism',
-        short_name: 'FoodTour',
-        description: 'Ứng dụng khám phá tour ẩm thực dựa trên GPS',
-        theme_color: '#10b981',
-        background_color: '#ffffff',
-        display: 'standalone',
-        start_url: '/user',
-        icons: [
-          {
-            src: '/pwa-192x192.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'any maskable'
-          },
-          {
-            src: '/pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any maskable'
-          }
-        ]
-      }
-
-    })
-  ],
-// ... các phần plugins giữ nguyên
-
-server: {
-    host: 'localhost', 
-    port: 5173,
-    strictPort: true,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3000', // Trỏ về localhost thay vì IP
-        changeOrigin: true,
-      },
-      '/uploads': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
+          ],
+        },
+        manifest: {
+          name: 'Tour ẩm thực - GPS Tourism',
+          short_name: 'FoodTour',
+          description: 'Ứng dụng khám phá tour ẩm thực dựa trên GPS',
+          theme_color: '#10b981',
+          background_color: '#ffffff',
+          display: 'standalone',
+          start_url: '/user',
+          icons: [
+            {
+              src: '/pwa-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any maskable'
+            },
+            {
+              src: '/pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any maskable'
+            }
+          ]
+        }
+      })
+    ],
+    server: {
+      host: 'localhost',
+      port: 5173,
+      strictPort: true,
+      // Cho phép tất cả các host để không bao giờ bị lỗi "Blocked host" khi dùng tunnel
+      allowedHosts: ['all'], 
+      proxy: {
+        '/api': {
+          target: API_TARGET,
+          changeOrigin: true,
+          secure: false,
+        },
+        '/uploads': {
+          target: API_TARGET,
+          changeOrigin: true,
+          secure: false,
+        }
       }
     }
-}
+  };
 });

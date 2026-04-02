@@ -151,14 +151,23 @@ export function UserPoiModal({ poi, onClose }: { poi: POIWithDistance; onClose: 
     navigate("/user/map");
   };
 
-  /** Nút "Nghe trực tuyến" — Stream, không lưu cache */
+  /** Nút phát — Smart: Stream khi online, Blob URL từ cache khi offline */
   const handleStream = () => {
-    if (!isOnline) return; // Guard: không online thì nút đã bị disable
     if (isCurrentlyPlaying) {
       pauseAudio();
       return;
     }
-    // Phát từ URL stream (không qua cache)
+
+    if (playability === "offline_only") {
+      // Offline + có cache: KHÔNG truyền overrideUrl
+      // → hook sẽ tự dùng getAudioBlobUrl() để lấy Blob URL từ Cache Storage
+      playAudio(poi);
+      return;
+    }
+
+    if (!isOnline) return; // Offline + không cache → nút đã bị disable, guard phòng thủ
+
+    // Online: Stream trực tiếp từ server
     const streamUrl = `/uploads/audio/poi_${poi.id}_${lang}_v${audioVersion}.mp3`;
     playAudio(poi, streamUrl);
   };
@@ -207,6 +216,7 @@ export function UserPoiModal({ poi, onClose }: { poi: POIWithDistance; onClose: 
     if (!hasServerAudio) return null;
 
     if (isOfflineAndNoCache) {
+      // Offline + không có cache: hiển thị 🔇 disabled
       return (
         <button
           disabled
@@ -219,18 +229,26 @@ export function UserPoiModal({ poi, onClose }: { poi: POIWithDistance; onClose: 
       );
     }
 
+    // Xác định label nút
+    // - Online: "Nghe trực tuyến"
+    // - Offline + cached: "Nghe offline"
+    const isOfflineCached = !isOnline && playability === "offline_only";
+
     return (
       <button
         onClick={handleStream}
-        disabled={!isOnline && playability !== "offline_only"}
         className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-sm shadow-lg transition-all active:scale-95
           ${isCurrentlyPlaying
             ? "bg-red-500 text-white shadow-red-200"
-            : "bg-blue-600 text-white shadow-blue-200"
+            : isOfflineCached
+              ? "bg-green-600 text-white shadow-green-200"
+              : "bg-blue-600 text-white shadow-blue-200"
           }`}
       >
         {isCurrentlyPlaying ? (
           <><Pause size={20} fill="currentColor" /> Tạm dừng</>
+        ) : isOfflineCached ? (
+          <><Radio size={18} /> Nghe offline ✓</>
         ) : (
           <><Radio size={18} /> Nghe trực tuyến</>
         )}

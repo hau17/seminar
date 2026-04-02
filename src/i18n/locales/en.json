@@ -1,0 +1,39 @@
+{
+  "login": {
+    "title": "Guest Login",
+    "email": "Email",
+    "password": "Password",
+    "language": "Display Language & Audio",
+    "submit": "Login",
+    "submitting": "Logging in...",
+    "no_account": "Don't have an account?",
+    "register_now": "Register now"
+  },
+  "info": {
+    "current_lang": "Current Language",
+    "change": "Change",
+    "suggested_tours": "Nearby Tours (Recommended)",
+    "nearby_pois": "Nearby Attractions",
+    "my_tours": "My Tours",
+    "add_tour": "+ Add Tour",
+    "no_suggested_tours": "No recommended tours nearby.",
+    "finding_pois": "Finding nearby locations...",
+    "no_user_tours": "You don't have any tours yet.",
+    "create_tour_now": "Create a tour now!",
+    "stops": "stops",
+    "attractions": "attractions"
+  },
+  "layout": {
+    "title": "GPS Tour Guide",
+    "tabs": {
+      "info": "Info",
+      "map": "Map"
+    },
+    "sync": {
+      "loading": "Loading data...",
+      "cache": "Syncing cache...",
+      "lang": "Syncing language...",
+      "preparing": "The system is preparing content for your language. Please wait a moment..."
+    }
+  }
+}

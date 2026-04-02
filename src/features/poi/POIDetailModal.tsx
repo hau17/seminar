@@ -12,13 +12,6 @@ interface POIDetailModalProps {
   onDelete?: () => void;
 }
 
-const LANGUAGES = [
-  { code: 'vi', label: 'Tiếng Việt' },
-  { code: 'en', label: 'English' },
-  { code: 'zh', label: '中文' },
-  { code: 'ja', label: '日本語' },
-  { code: 'ko', label: '한국어' },
-];
 
 function ImageGrid({ images }: { images?: POIImage[] }) {
   if (!images?.length) return null;

@@ -67,6 +67,7 @@ Hệ thống GPS Du lịch Đa ngôn ngữ là nền tảng gồm 3 ứng dụng
 | **Realtime / Online tracking** | Firebase Realtime Database                    |
 | **File storage**               | Local filesystem                              |
 | **Auth**                       | JWT (access token)                            |
+| **Đa ngôn ngữ UI (Frontend)**  | Thư viện `i18n` (ví dụ: `react-i18next`) với các file từ điển tĩnh (JSON) |
 | **Frontend Admin**             | React + Leaflet (bản đồ)                      |
 | **Frontend Business**          | React (không có bản đồ)                       |
 | **Frontend User**              | React Native hoặc React PWA + Leaflet         |
@@ -265,7 +266,7 @@ Tương tự click trong danh sách: highlight + mở Popup Modal thông tin POI
 
 #### 5.4.3 Popup Modal — Xem thông tin POI
 
-**Hiển thị (read-only):**
+**1. Modal thông tin POI chính (read-only):**
 
 - Tên POI
 - Mô tả gốc (tiếng Việt mặc định)
@@ -273,14 +274,32 @@ Tương tự click trong danh sách: highlight + mở Popup Modal thông tin POI
 - Vĩ độ (Latitude)
 - Phạm vi (Range) — đơn vị mét
 - Ảnh (hiển thị dạng thumbnail grid, tối đa 5 ảnh; click ảnh → xem full size)
-- **Dropdown chọn ngôn ngữ:** (Mặc định chọn Tiếng Việt).
-- **Phần thông tin theo ngôn ngữ đã chọn:**
-  - **Tên và Mô tả đã dịch:** Khi chọn một ngôn ngữ, hiển thị phần Tên đã dịch và Mô tả đã dịch của ngôn ngữ đó ở ngay bên dưới.
-  - **Audio hướng dẫn:** CHỈ hiển thị duy nhất 1 file audio thuộc về ngôn ngữ vừa chọn (không list toàn bộ ngôn ngữ).
-  - **Logic On-demand:** Nếu ngôn ngữ được chọn chưa có bản dịch hoặc chưa có file audio, hệ thống sẽ tự động tiến hành dịch CẢ "Tên POI" và "Mô tả", đồng thời tạo audio (gọi API sinh audio thông qua script Python `translate.py` và `tts.py`).
-  - **UX Loading:** Trong quá trình dịch thuật và sinh audio, giao diện hiển thị thông báo tiến độ hoàn thành ở bên dưới (ví dụ: "Đang dịch...", "Đang tạo audio..."). Khi quá trình này xong, thông báo tiến độ biến mất và sau đó hiển thị nội dung bản dịch, file audio kèm các nút thao tác (Play, Pause).
+- Nút bấm **"Ngôn ngữ & Audio"**: Mở Modal phụ để xem thông tin dịch thuật và nghe âm thanh hướng dẫn.
 
-**Action buttons:**
+**2. Modal phụ "Ngôn ngữ & Audio":**
+
+Khi nhấn vào nút "Ngôn ngữ & Audio" ở modal chính, hệ thống hiển thị Popup/Modal mới với cấu trúc:
+- **Tiêu đề trên cùng:** "Ngôn ngữ & Audio"
+- **Điểm tham quan:** [Tên POI gốc] *(Ví dụ: Quán ăn doanh nghiệp)*
+- **Chọn ngôn ngữ hiển thị & phát âm:** [Dropdown chọn ngôn ngữ] *(Mặc định là Tiếng Việt)*
+
+Tùy thuộc vào ngôn ngữ được chọn tại Dropdown, nội dung bên dưới thay đổi như sau:
+- **TRƯỜNG HỢP 1 (Ngôn ngữ gốc - VD: Tiếng Việt):**
+  Chỉ hiển thị công cụ phát âm thanh:
+  - Audio Player: [Giao diện phát nhạc có nút Play/Pause]
+
+- **TRƯỜNG HỢP 2 (Ngoại ngữ - VD: Tiếng Anh, Tiếng Đức...):**
+  Hiển thị bản dịch văn bản trước khi hiện công cụ Audio:
+  - Tên đã dịch: [Tên POI đã dịch] *(VD: Business-Restaurant)*
+  - Mô tả đã dịch: [Mô tả POI đã dịch] *(VD: sehr lecker)*
+  - Audio Player: [Giao diện phát nhạc có nút Play/Pause]
+
+**Cơ chế On-demand:**
+- Khi đổi ngôn ngữ trong Dropdown, nếu ngôn ngữ đó chưa có bản dịch hoặc chưa có file audio trong Database, hệ thống sẽ tự động gọi API On-demand (gọi script `translate.py` và `tts.py`).
+- Trong thời gian chờ xử lý, giao diện hiển thị trạng thái *"Đang dịch..."*, *"Đang tạo âm thanh..."*. 
+- Sau khi quá trình hoàn tất, hệ thống tự động tải lại và hiển thị cấu trúc theo Trường hợp 2.
+
+**Action buttons (Tại Modal thông tin chính):**
 
 - **Sửa** → Mở form sửa POI (5.4.5)
 - **Xóa** → Mở hộp thoại xác nhận (5.4.6)
@@ -326,13 +345,14 @@ Admin chỉ được sửa POI do Admin tạo (`owner_type = 'admin'`).
 **Sau khi submit:**
 1. `PUT /api/admin/pois/:id` — cập nhật POI trong DB.
 2. Xử lý ảnh (xóa ảnh bị xóa, upload ảnh mới).
-3. **LƯU Ý KHI THAY ĐỔI TÊN HOẶC MÔ TẢ:** Nếu Admin thay đổi "Tên POI" HOẶC "Mô tả", hệ thống bắt buộc phải:
-   - Tự động tính toán `new_version = old_version + 1`.
-   - **Xóa toàn bộ file audio cũ** của POI này (mọi ngôn ngữ, mọi version): `DELETE /uploads/audio/poi_{id}_*.mp3`
-   - **Xóa records trong bảng `poi_audio_files`**.
-   - **Xóa records trong bảng `poi_translations`** (xóa sạch toàn bộ bản dịch cũ vì nội dung gốc đã thay đổi).
-   - Gọi Python TTS tạo lại audio tiếng Việt lập tức với version gia tăng: `poi_{id}_vi_v{new_version}.mp3`.
-   - Lưu record audio mới vào bảng `poi_audio_files` tại cột phiên bản version = `new_version`.
+3. **LƯU Ý KHI THAY ĐỔI TÊN HOẶC MÔ TẢ:** Hệ thống thực hiện side effect tối ưu như sau:
+   - **Về Audio (Chỉ khi đổi Mô tả):** Nếu trường `description` thay đổi, hệ thống bắt buộc phải:
+     - Tính toán `new_version = old_version + 1`.
+     - Xóa toàn bộ file audio cũ vật lý: `DELETE /uploads/audio/poi_{id}_*.mp3` và xóa các records trong bảng `poi_audio_files`.
+     - Gọi Python TTS tạo lại audio tiếng Việt lập tức với version mới: `poi_{id}_vi_v{new_version}.mp3` và lưu record mới vào DB.
+     - *(Nếu chỉ đổi Tên và giữ nguyên Mô tả: Giữ nguyên Audio cũ, không tăng version).*
+   - **Về Dịch thuật (Khi đổi Tên HOẶC Mô tả):** Nếu một trong hai trường này thay đổi, hệ thống bắt buộc phải:
+     - Xóa sạch toàn bộ bản dịch cũ trong bảng `poi_translations` để đảm bảo tính nhất quán của nội dung đa ngôn ngữ.
 
 #### 5.4.6 Xóa POI
 
@@ -366,25 +386,34 @@ Bản đồ Leaflet hiển thị tất cả POI (chấm xanh lá). Panel trái h
 - Danh sách Tour (tên tour)
 - Button "+ Thêm Tour"
 
-#### 5.5.1 Click vào Tour trong danh sách
+#### 5.5.1 Popup Modal thông tin Tour (read-only)
 
-1. Bản đồ tự động `fitBounds` để hiển thị tất cả POI trong tour
-2. Các POI thuộc tour được **highlight màu cam/đỏ** với **số thứ tự** hiển thị trên chấm (1, 2, 3...)
-3. Các POI không thuộc tour vẫn hiển thị bình thường (chấm xanh lá)
-4. Mở **Popup Modal thông tin Tour**
+**1. TRONG MODAL THÔNG TIN TOUR CHÍNH:**
+- **Hiển thị thông tin gốc:** Tên Tour, Mô tả, Ảnh (thumbnail grid), Danh sách các POI thuộc tour (số thứ tự + tên + tọa độ).
+- **Gỡ bỏ:** Không hiển thị Dropdown chọn ngôn ngữ hay các nội dung dịch thuật trực tiếp tại đây.
+- **Nút bấm:** Bổ sung một nút duy nhất có nhãn **"Ngôn ngữ"** (hoặc "Dịch thuật") để xử lý đa ngôn ngữ.
 
-**Popup Modal thông tin Tour (read-only):**
+**2. MODAL PHỤ "DỊCH THUẬT TOUR":**
+Khi nhấn vào nút "Ngôn ngữ", hệ thống mở ra một Popup/Modal mới với cấu trúc:
+- **Tiêu đề:** Dịch thuật Tour
+- **Tour:** [Tên Tour gốc]
+- **Chọn ngôn ngữ hiển thị:** [Dropdown chọn ngôn ngữ] (Dữ liệu fetch từ API bảng `languages`).
+- **TRƯỜNG HỢP 1 (Chọn ngôn ngữ gốc - VD: Tiếng Việt):** Hệ thống không hiển thị thêm trường thông tin dịch nào cả.
+- **TRƯỜNG HỢP 2 (Chọn ngôn ngữ ngoại ngữ - VD: English):** Hiển thị thông tin bản dịch từ bảng `tour_translations`:
+  - **Tên đã dịch:** [Tên Tour đã dịch]
+  - **Mô tả đã dịch:** [Mô tả Tour đã dịch]
 
-- Tên Tour
-- Mô tả
-- Ảnh (thumbnail grid, click xem full)
-- Danh sách POI trong tour (theo thứ tự): số thứ tự + tên POI + tọa độ
+**3. LOGIC ON-DEMAND (Chỉ dành cho Text):**
+- Khi người dùng đổi sang ngoại ngữ trong Dropdown, nếu chưa có sẵn bản dịch:
+  - Giao diện hiển thị trạng thái Loading: *"Đang dịch..."*.
+  - Hệ thống tự động gọi API ngầm (**CHỈ gọi script `translate.py`** để dịch chữ, **TUYỆT ĐỐI KHÔNG gọi `tts.py`**).
+  - Sau khi dịch xong, lưu vào DB (bảng `tour_translations`) và cập nhật kết quả lên giao diện như Trường hợp 2.
 
-**Action buttons:**
+**Action buttons (Tại Modal chính):**
+- **Sửa** → Mở Form sửa Tour.
+- **Xóa** → Hộp thoại xác nhận xóa.
+- **Đóng** → Đóng modal và bỏ highlight trên bản đồ.
 
-- **Sửa** → Form sửa Tour
-- **Xóa** → Hộp thoại xác nhận
-- **Đóng** → Đóng modal, bỏ highlight
 
 #### 5.5.2 Thêm Tour mới
 
@@ -418,6 +447,9 @@ Form tương tự Thêm Tour, điền sẵn dữ liệu hiện tại:
 
 - Sửa được: Tên, Mô tả, Ảnh (xóa/thêm ≤ 5), Danh sách POI (thêm/bớt/đổi thứ tự)
 - Submit → `PUT /api/admin/tours/:id`
+- **Side effect (Cập nhật):** 
+  - **Nếu có thay đổi Tên hoặc Mô tả:** Xóa sạch bản dịch trong `tour_translations`.
+  - **Nếu KHÔNG thay đổi Tên và Mô tả (Ví dụ: chỉ đổi Ảnh hoặc đổi Danh sách POI):** TUYỆT ĐỐI GIỮ NGUYÊN các bản dịch hiện có để tiết kiệm chi phí dịch thuật.
 
 #### 5.5.4 Xóa Tour
 
@@ -426,6 +458,7 @@ Hộp thoại xác nhận → `DELETE /api/admin/tours/:id`:
 - Xóa record Tour
 - Xóa records trong `tour_pois`
 - Xóa file ảnh Tour vật lý
+- **Side effect:** Khi xóa Tour, các bản dịch của Tour đó đang lưu trong bảng `tour_translations` cũng bị xóa theo.
 
 > **Lưu ý:** Xóa Tour KHÔNG xóa POI. POI vẫn tồn tại độc lập.
 
@@ -522,19 +555,36 @@ Hiển thị:
 
 **Click vào POI trong danh sách → Popup Modal xem thông tin POI:**
 
+**1. Modal thông tin POI chính:**
+
 - Tên POI
 - Mô tả gốc (tiếng Việt mặc định)
 - Kinh độ, Vĩ độ
 - Phạm vi (Range)
 - Ảnh (thumbnail, click xem full)
-- **Dropdown chọn ngôn ngữ:** (Mặc định chọn Tiếng Việt).
-- **Phần thông tin theo ngôn ngữ đã chọn:**
-  - **Tên và Mô tả đã dịch:** Khi chọn một ngôn ngữ, hiển thị phần Tên đã dịch và Mô tả đã dịch của ngôn ngữ đó ở ngay bên dưới.
-  - **Audio hướng dẫn:** CHỈ hiển thị duy nhất 1 file audio thuộc về ngôn ngữ vừa chọn (không list toàn bộ).
-  - **Logic On-demand:** Nếu ngôn ngữ được chọn chưa có bản dịch hoặc chưa có file audio, hệ thống sẽ tự động tiến hành dịch CẢ "Tên POI" và "Mô tả", đồng thời tạo audio (gọi script Python `translate.py` và `tts.py`).
-  - **UX Loading:** Trong quá trình dịch thuật và sinh audio, giao diện hiển thị thông báo tiến độ hoàn thành ở bên dưới. Khi quá trình hoàn tất, hiển thị nội dung, file audio cùng các nút thao tác.
+- Nút bấm **"Ngôn ngữ & Audio"**: Mở Modal phụ cấu hình dịch thuật và âm thanh.
 
-**Action buttons trong modal:**
+**2. Modal phụ "Ngôn ngữ & Audio":**
+
+Tương tự cơ chế của Admin, hệ thống bật mở một Popup mới với nội dung cấu trúc sau:
+- **Tiêu đề trên cùng:** "Ngôn ngữ & Audio"
+- **Điểm tham quan:** [Tên POI gốc]
+- **Chọn ngôn ngữ hiển thị & phát âm:** [Dropdown chọn ngôn ngữ] *(Mặc định: Tiếng Việt)*
+
+Tùy vào ngôn ngữ lựa chọn ở Dropdown:
+- **TRƯỜNG HỢP 1 (Ngôn ngữ gốc - VD: Tiếng Việt):**
+  - Audio Player: [Giao diện phát nhạc]
+
+- **TRƯỜNG HỢP 2 (Ngoại ngữ - VD: Tiếng Anh, Đức...):**
+  - Tên đã dịch: [Tên POI đã dịch]
+  - Mô tả đã dịch: [Mô tả POI đã dịch]
+  - Audio Player: [Giao diện phát nhạc]
+
+**Cơ chế On-demand (Giữ nguyên logic gốc):**
+- Hệ thống tự động gọi API dịch thuật Text và tạo Âm thanh Audio bằng file thực thi Python (`translate.py` và `tts.py`) nếu nội dung chưa có sẵn trong CSDL.
+- Trong thời gian chờ, hệ thống hiển thị label Loading: *"Đang dịch..."*, *"Đang tạo âm thanh..."*. Hiển thị nội dung đầy đủ sau khi thực thi ngầm kết thúc.
+
+**Action buttons trong modal chính:**
 
 - **Sửa** → Form sửa POI
 - **Xóa** → Hộp thoại xác nhận
@@ -560,11 +610,11 @@ Click "+ Thêm POI" → Form thêm POI:
 #### 6.4.2 Sửa POI (Business)
 
 Giống quy luật của Admin, cửa sổ sửa POI cho Doanh nghiệp cho sửa: Tên, Mô tả, Kinh độ, Vĩ độ, Range, Ảnh (xóa đi/thêm vào ≤ 5).
-**Sau khi submit (Trigger logic như Admin):** 
+**Sau khi submit (Trigger logic TỐI ƯU như Admin):** 
 1. `PUT /api/business/pois/:id`.
-2. **Nếu thay đổi Tên HOẶC Mô tả:** Tương tự logic Admin, hệ thống định danh `new_version = old_version + 1`, hủy toàn bộ file audio cũ và **xóa toàn bộ các bản dịch hiện có** trên DB vì nội dung phần chữ đã bị thay đổi gốc.
-3. Sinh lại audio Tiếng Việt dưới định dạng tên file gia tăng tiến trình: `poi_{id}_vi_v{new_version}.mp3`
-4. Cập nhật record phiên bản vào `poi_audio_files` làm tham chiếu cho App thiết bị.
+2. **Side effect Về Audio (Chỉ khi đổi Mô tả):** Nếu `description` thay đổi, hệ thống tăng `new_version = old_version + 1`, xóa sạch các file audio cũ của POI này vật lý và xóa record trong `poi_audio_files`.
+3. Sinh lại audio Tiếng Việt của version mới: `poi_{id}_vi_v{new_version}.mp3` và cập nhật record version vào DB.
+4. **Side effect Về Dịch thuật (Khi đổi Tên HOẶC Mô tả):** Xóa sạch toàn bộ bản dịch hiện có trong bảng `poi_translations` để chuẩn bị cho quá trình On-demand mới.
 
 #### 6.4.3 Xóa POI (Business)
 
@@ -601,8 +651,9 @@ Giống quy luật của Admin, cửa sổ sửa POI cho Doanh nghiệp cho sử
 1. Nếu là đăng nhập mới: `POST /api/auth/user/login` với `{ email, password, language_code }`. Lưu JWT token + `language_code` vào storage.
 2. **Background job (Session Init - Thực hiện DUY NHẤT 1 LẦN):**
    - **Sync Version:** Gửi danh sách POI ID/Version hiện băm ở Local Cache lên Server (hoặc lấy danh sách POI gần nhất từ Server kèm Version mới nhất). Thực hiện đối chiếu toàn diện: Nếu `local_version` < `server_version`, đánh dấu cần xóa/tải lại.
-   - **Dịch thuật:** Truy vấn tất cả POI trong bán kính 20km. **ĐẶC BIỆT BỔ SUNG:** Dịch luôn cả các POI nằm ngoài phạm vi 20km, NẾU các POI đó nằm trong một Tour có ít nhất 1 POI nằm trong bán kính 20km. Với mỗi POI: kiểm tra/tạo bản dịch (áp dụng cho CẢ `name` và `description`) cho `language_code` đang thiết lập nếu chưa có.
-   - **Tour:** Tương tự cho các Tour trong phạm vi 20km.
+   - **Dịch thuật (POI & Tour):** 
+     - **POI:** Truy vấn tất cả POI trong bán kính 20km (hoặc POI thuộc Tour gần đó). Kiểm tra/tạo bản dịch (áp dụng cho CẢ `name` và `description`) cho `language_code` đang thiết lập nếu chưa có trong bảng `poi_translations`.
+     - **Tour:** Truy vấn các Tour (do Admin tạo) trong phạm vi 20km. Kiểm tra và tự động trigger tiến trình gọi API On-demand (**CHỈ dùng script `translate.py`** để dịch chữ, **TUYỆT ĐỐI KHÔNG dùng `tts.py`**) để tạo bản dịch cho "Tên Tour" và "Mô tả Tour" theo `language_code` của thiết bị nếu bản dịch chưa tồn tại trong bảng `tour_translations`.
 3. **UX (Quy tắc hiển thị):** Hệ thống bắt buộc hiển thị màn hình chờ "Đang đồng bộ dữ liệu..." và **CHỈ BẮT ĐẦU HIỂN THỊ** màn hình chính / danh sách POI (với tên và mô tả đã được dịch) **SAU KHI** tiến trình dịch thuật này hoàn tất 100%.
 4. Sau khi hoàn thành → Vào màn hình chính. Kể từ lúc này, hệ thống **tin tưởng hoàn toàn** vào dữ liệu cache đã đồng bộ, không thực hiện kiểm tra lại version trong suốt session để tiết kiệm băng thông.
 
@@ -664,10 +715,10 @@ Khi nhấn "Đổi ngôn ngữ":
 
 **Nhấn vào 1 Tour → Màn hình chi tiết Tour:**
 
-- Tên Tour (theo ngôn ngữ)
-- Mô tả (theo ngôn ngữ — lấy từ `tour_translations` hoặc mô tả gốc nếu chưa dịch)
-- Ảnh (thumbnail grid)
-- Danh sách POI trong tour (theo thứ tự): số thứ tự + tên POI đã dịch (BẮT BUỘC dùng `translated_name` theo ngôn ngữ user, chỉ fallback về gốc nếu trống)
+- **Tên Tour & Mô tả:** BẮT BUỘC hiển thị bản đã dịch (`translated_name`, `translated_description`) theo đúng ngôn ngữ mà User đang chọn sử dụng (vì đã được đồng bộ dịch ở Session Init). Chỉ fallback về nội dung gốc nếu có sự cố kỹ thuật hoặc bản dịch chưa kịp hoàn tất.
+- **Trải nghiệm Tour:** Chỉ hiển thị văn bản (Text-only), **không có các nút Play/Download Audio** (khác với POI).
+- **Ảnh:** Thumbnail grid.
+- **Danh sách POI trong tour (theo thứ tự):** Số thứ tự + tên POI đã dịch (BẮT BUỘC dùng `translated_name` theo ngôn ngữ user, chỉ fallback về gốc nếu trống).
 
 **Khi nhấn vào 1 POI trong danh sách:**
 
@@ -911,6 +962,29 @@ if __name__ == "__main__":
     print(result)
 ```
 
+### 8.7 Cơ chế dịch giao diện (UI Localization)
+
+Để đảm bảo trải nghiệm người dùng mượt mà và tối ưu hiệu năng, hệ thống phân tách hoàn toàn giữa hai luồng dịch thuật:
+
+| Đặc tính | Dịch Nội dung động (Dynamic) | Dịch Giao diện tĩnh (Static UI) |
+| :--- | :--- | :--- |
+| **Đối tượng** | Tên POI, Mô tả POI, Tên Tour, Mô tả Tour. | Button, Label, Tiêu đề, Toast, Placeholder... |
+| **Cơ chế** | API On-demand (gọi script Python). | Thư viện i18n (local dictionary). |
+| **Lưu trữ** | Lưu trong Database (`poi_translations`, `tour_translations`). | Lưu trong các file JSON tĩnh (vi, en, zh, ja, ko) được đóng gói cùng source code. |
+| **Thời điểm** | Đồng bộ tại Session Init hoặc trigger On-demand. | Load ngay khi khởi chạy ứng dụng. |
+| **Hành vi UX** | Có màn hình chờ "Đang đồng bộ..." (nếu cần). | **Chuyển đổi tức thì (Instant switch)** khi đổi ngôn ngữ, không có độ trễ. |
+
+#### Quy trình cập nhật ngôn ngữ UI:
+Khi người dùng thay đổi ngôn ngữ tại màn hình Đăng nhập hoặc Tab Thông tin:
+1. **Nguồn dữ liệu Dropdown:** Hệ thống BẮT BUỘC fetch danh sách ngôn ngữ động từ API hệ thống (bảng `languages` trong Database) để hiển thị các lựa chọn cho người dùng.
+2. **Cơ chế Fallback (Dự phòng):** Thư viện i18n ở Frontend phải được cấu hình một ngôn ngữ mặc định (Tiếng Anh - 'en'). Nếu người dùng chọn một ngôn ngữ từ Dropdown (ví dụ: 'fr') mà ứng dụng CHƯA CÓ file từ điển tĩnh tương ứng (ví dụ: `fr.json`), thì toàn bộ Text Giao diện (nút bấm, tiêu đề) sẽ tự động fallback hiển thị bằng Tiếng Anh.
+3. **Sự độc lập của Nội dung:** Dù UI hiển thị bằng ngôn ngữ Fallback (Tiếng Anh), nhưng luồng dịch ngầm Nội dung/Audio (POI, Tour) VẪN PHẢI gọi API thực thi dịch sang đúng ngôn ngữ User đã chọn (Tiếng Pháp) và lưu vào Database / Cache Local bình thường.
+4. Hệ thống cập nhật `language_code` trong local storage.
+5. Thư viện i18n tự động map lại các key dịch tương ứng từ file JSON cục bộ (hoặc fallback về 'en').
+6. Toàn bộ UI Labels cập nhật ngay lập tức mà không có độ trễ.
+
+---
+
 ---
 
 ## 9. Business Rules
@@ -920,7 +994,7 @@ if __name__ == "__main__":
 | BR-01 | POI không thể xóa nếu đang nằm trong ít nhất 1 Tour (Admin hoặc User). Áp dụng cho cả Admin và Doanh nghiệp.                                      |
 | BR-02 | Mô tả POI là bắt buộc (không được để trống) vì dùng để tạo audio TTS.                                                                             |
 | BR-03 | Khi thêm mới POI → ngay lập tức tạo audio tiếng Việt (`vi_v0`).                                                                                   |
-| BR-04 | **Version Audio (Cache Invalidation):** Khi một phần nội dung của POI ("Tên POI" HOẶC "Mô tả") bị thay đổi, hệ thống **bắt buộc phải xóa toàn bộ bản dịch hiện có của các ngôn ngữ** (do nội dung gốc đã sai lệch) và **tăng (increment +1)** tham số `version`. Server sẽ xóa file cũ và tạo lại bản mới gốc. App người dùng sử dụng chỉ số này để xóa cache cũ; tuy nhiên, việc kiểm tra và đối chiếu version này **CHỈ thực hiện DUY NHẤT 1 LẦN** khi người dùng vừa khởi động ứng dụng hoặc đăng nhập (Session Init). Toàn bộ quá trình sử dụng sau đó (di chuyển, bật/tắt audio) hệ thống sẽ mặc định tin tưởng Cache local để tối ưu hóa băng thông. |
+| BR-04 | **Version Audio & Xóa Cache Dịch:** <br>1. **Audio (Căn cứ trên Mô tả):** Cột `version` chỉ tăng (+1) và xóa/tạo lại file âm thanh khi nội dung **Mô tả (Description)** thay đổi. Nếu chỉ đổi Tên (Name), Version Audio được giữ nguyên.<br>2. **Dịch thuật (Căn cứ trên Tên + Mô tả):** Xóa toàn bộ bản dịch cũ nếu có thay đổi ở **Tên HOẶC Mô tả**.<br>3. **Logic tại App:** Việc kiểm tra đối chiếu version chỉ thực hiện **DUY NHẤT 1 LẦN** tại Session Init. Sau đó hệ thống tin tưởng hoàn toàn vào Local Cache. |
 | BR-05 | Khi xóa POI → xóa toàn bộ file audio + bản dịch + ảnh liên quan.                                                                                  |
 | BR-06 | Admin không thể sửa POI của Doanh nghiệp. Chỉ có thể xem và xóa (khi POI không trong tour).                                                       |
 | BR-07 | Doanh nghiệp không thể xóa POI của doanh nghiệp khác, không nhìn thấy POI của doanh nghiệp khác.                                                  |
@@ -937,6 +1011,9 @@ if __name__ == "__main__":
 | BR-18 | Khi xóa Tour → không xóa POI, chỉ xóa record Tour và các liên kết `tour_pois`.                                                                    |
 | BR-19 | POI range mặc định = 1 nếu không nhập.                                          |
 | BR-20 | Doanh nghiệp đăng ký không cần Admin duyệt. Tự động được phép đăng nhập ngay sau khi đăng ký.                                                     |
+| BR-21 | **Dịch thuật Tour:** Tính năng dịch đa ngôn ngữ đối với Tour (Tên, Mô tả) chỉ hỗ trợ cho các Tour do Admin tạo. Khi User đăng nhập hoặc đổi ngôn ngữ, App sẽ tự động đồng bộ và gọi dịch ngầm (**On-demand Text-only**) cho các Tour của Admin trong phạm vi gần (20km), đảm bảo User luôn thấy nội dung Tour hiển thị nhất quán bằng ngôn ngữ của họ tương tự như POI. Khi Admin cập nhật nội dung Tour, hệ thống xóa cache bản dịch cũ trong bảng `tour_translations`. |
+| BR-22 | **Quy chuẩn UI Localization:** Tuyệt đối không sử dụng API On-demand (Python) để dịch các thành phần giao diện tĩnh (UI). Mọi text cứng trên giao diện phải được quản lý tập trung qua các file từ điển ngôn ngữ (JSON) phía Frontend. Việc mở rộng ngôn ngữ mới trong tương lai cho giao diện chỉ thực hiện bằng cách bổ sung file JSON tương ứng mà không cần thay đổi cấu trúc Database hoặc Logic Backend. |
+| BR-24 | **Độc lập giữa Ngôn ngữ UI và Nội dung:** Hệ thống luôn lấy danh sách ngôn ngữ động từ Database (`languages` table) làm nguồn chuẩn duy nhất cho các Dropdown lựa chọn. Chấp nhận sự bất đồng bộ giữa số lượng file dịch giao diện (hỗ trợ MVP 5 ngôn ngữ) và số lượng ngôn ngữ nội dung (hỗ trợ 12+). Frontend bắt buộc cấu hình cơ chế Fallback của i18n về Tiếng Anh cho UI nếu thiếu file từ điển, đảm bảo ứng dụng không bị lỗi (crash) khi Admin thêm ngôn ngữ mới vào hệ thống. |
 
 ---
 
@@ -1199,9 +1276,9 @@ PUT /api/admin/pois/:id
   404: { error: "POI không tồn tại" }
   403: { error: "Không có quyền sửa POI này" }
   -- Side effect TỐI QUAN TRỌNG: 
-     1) Tính toán: new_version = old_version + 1. Tính toán logic version vào DB.
-     2) Quét và xóa SẠCH toàn bộ file âm thanh (mp3) của MỌI ngôn ngữ hiện đang lưu và các record bản dịch của POI này.
-     3) Sinh lập tức audio Tiếng Việt (bản gốc) theo hệ version mới (`poi_{id}_vi_v{new_version}.mp3`).
+     1) Về Audio (Chỉ khi đổi Mô tả): Hệ thống tính toán `new_version = old_version + 1`, xóa sạch các mp3 cũ vật lý và tạo lại audio Tiếng Việt theo version mới. Trả về `audio_version` mới.
+     2) Về Dịch thuật (Khi đổi Tên HOẶC Mô tả): Xóa sạch các record trong `poi_translations`.
+     3) Nếu không đổi name/description (chỉ đổi lat/lng/ảnh...): GIỮ NGUYÊN Audio Version và các bản dịch hiện có.
 
 DELETE /api/admin/pois/:id
   Method: DELETE
@@ -1220,7 +1297,8 @@ GET /api/admin/tours
   200: [{ 
          id: number, name: string, description: string, created_by_type: string, created_by_id: number,
          images: [{ id: number, file_path: string }],
-         pois: [{ position: number, poi_id: number, name: string, lat: number, lng: number }] 
+         pois: [{ position: number, poi_id: number, name: string, lat: number, lng: number }],
+         translations: [{ language_code: string, translated_name: string, translated_description: string }]
        }]
 
 POST /api/admin/tours
@@ -1242,13 +1320,16 @@ PUT /api/admin/tours/:id
   Body: { name?, description?, new_images[], delete_image_ids[], poi_ids? }
   200: { success: true }
   404: { error: "Tour không tồn tại" }
+  -- Side effect: 
+     1) Nếu thay đổi `name` hoặc `description`: Xóa sạch các record bản dịch của Tour này trong `tour_translations`.
+     2) Nếu KHÔNG thay đổi name/description: Giữ nguyên toàn bộ bản dịch hiện có.
 
 DELETE /api/admin/tours/:id
   Method: DELETE
   Header: Authorization: Bearer <admin_token>
   200: { success: true }
   404: { error: "Tour không tồn tại" }
-  -- Side effect: Loại bỏ record Tour khỏi hệ thống, KHÔNG xóa các tham chiếu POI gốc.
+  -- Side effect: Loại bỏ record Tour khỏi hệ thống, KHÔNG xóa các tham chiếu POI gốc. Bắt buộc xóa kèm các records bên trong bảng `tour_translations`.
 
 ### 11.4 Admin — Doanh nghiệp
 

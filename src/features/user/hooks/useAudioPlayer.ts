@@ -148,17 +148,20 @@ export function useAudioPlayer(nearbyPOIs: POIWithDistance[], language: string) 
   // ─── BLOCK 3C: Hàm phát âm thanh (Cache → Stream → Error) ────────────────
 
   /**
-   * getAudioSource(poi)
-   * - Ưu tiên 1: Blob URL từ Cache (offline-first).
-   * - Ưu tiên 2: Stream URL từ server.
-   * - Trả về null nếu không thể phát.
+   * getAudioSource(poi, overrideUrl?)
+   *
+   * Giải quyết nguồn audio theo thứ tự ưu tiên:
+   *   1. Local Cache Blob URL (offline-first, luôn kiểm tra trước)
+   *   2. Nếu online và không có cache → overrideUrl hoặc buildAudioUrl (stream)
+   *   3. Offline + không có cache → null (🔇)
+   *
+   * NOTE: overrideUrl CHỈ được dùng khi không có cache VÀ đang online.
+   * Đây là fix cho bug: trước đây dùng overrideUrl thẳng dù offline → lỗi network.
    */
   const getAudioSource = async (
     poi: POIWithDistance,
     overrideUrl?: string | null
   ): Promise<string | null> => {
-    if (overrideUrl) return overrideUrl;
-
     const { version, hasServerAudio } = getAudioMeta(poi, language);
 
     if (!hasServerAudio) {
@@ -166,20 +169,21 @@ export function useAudioPlayer(nearbyPOIs: POIWithDistance[], language: string) 
       return null;
     }
 
-    // [Ưu tiên 1] Local Cache
+    // [Ưu tiên 1] Local Cache → luôn kiểm tra trước (offline-first)
     const blobUrl = await getAudioBlobUrl(poi.id!, language, version);
     if (blobUrl) {
-      console.info(`[AudioPlayer] Phát từ Cache (offline): ${blobUrl}`);
+      console.info(`[AudioPlayer] ✓ Phát từ Cache (Blob URL): ${blobUrl.substring(0, 40)}...`);
       return blobUrl;
     }
 
-    // [Ưu tiên 2] Stream URL (chỉ dùng khi online)
+    // [Ưu tiên 2] Không có cache → cần online
     if (!isOnline) {
       console.warn(`[AudioPlayer] POI#${poi.id} offline + không có cache → 🔇`);
       return null;
     }
 
-    const streamUrl = buildAudioUrl(poi.id!, language, version);
+    // Online: dùng overrideUrl nếu được truyền, nếu không thì build URL chuẩn
+    const streamUrl = overrideUrl || buildAudioUrl(poi.id!, language, version);
     console.info(`[AudioPlayer] Phát Stream từ server: ${streamUrl}`);
     return streamUrl;
   };
@@ -238,28 +242,17 @@ export function useAudioPlayer(nearbyPOIs: POIWithDistance[], language: string) 
   };
 
   // ─── Logic Trigger GPS (Chạy mỗi khi GPS cập nhật) ───────────────────────
+  // PRD §7.2, §8.3: useEffect này CHỈ xử lý Play/Pause theo vùng GPS.
+  // KHÔNG tải file audio ngầm — vi phạm Session Init spec.
 
   useEffect(() => {
     if (!nearbyPOIs || nearbyPOIs.length === 0) return;
 
-    // A. [Pre-load logic] Tải ngầm vào cache khi vào vùng 30m
-    nearbyPOIs.forEach(async (poi) => {
-      const range = poi.range_m ?? 1;
-      if (poi.distance <= range + 30) {
-        const { version, hasServerAudio } = getAudioMeta(poi, language);
-        if (!hasServerAudio || !isOnline) return;
+    // ❌ ĐÃ XÓA: Pre-load audio ngầm (cache.add khi vào vùng 30m)
+    // Lý do: Vi phạm PRD §7.2 và §8.3. Việc tải audio phải do user chủ động bấm
+    // nút "Tải xuống" — không được preload tự động ở bất kỳ hook nào.
 
-        const targetUrl = buildAudioUrl(poi.id!, language, version);
-        const cache = await caches.open("audio-cache-v1");
-        const match = await cache.match(targetUrl);
-        if (!match) {
-          // Pre-cache ngầm (silent)
-          cache.add(targetUrl).catch(() => {});
-        }
-      }
-    });
-
-    // B. [Play/Pause logic] Trigger 3s
+    // [Play/Pause logic] Trigger 3s khi vào/ra vùng phát
     const activeZones = nearbyPOIs.filter(
       (poi) => poi.distance <= (poi.range_m ?? 1) + 3
     );

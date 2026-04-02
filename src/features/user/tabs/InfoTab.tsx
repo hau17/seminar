@@ -1,7 +1,9 @@
 import { useOutletContext, useNavigate } from "react-router-dom";
 import { POIWithDistance } from "../hooks/useUserGPS";
 import { Globe, MapPin, Navigation, ChevronRight, PlusCircle } from "lucide-react";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { apiService } from "../../../services/api";
 import { UserPoiModal } from "../components/UserPoiModal";
 import { AdminTourDetail } from "../components/AdminTourDetail";
 import { UserTourDetail } from "../components/UserTourDetail";
@@ -19,18 +21,36 @@ interface GlobalContext {
   mapFocusPoi: any;
   setMapFocusPoi: (poi: any) => void;
   refreshData: () => void;
+  changeLanguage: (code: string) => Promise<void>;
 }
 
 export function InfoTab() {
   const navigate = useNavigate();
   const { 
-    nearbyPOIs, 
-    nearbyTours, 
-    setHighlightedTour, 
+    nearbyPOIs,
+    nearbyTours,
+    setHighlightedTour,
     setMapFocusPoi,
-    refreshData
+    refreshData,
+    changeLanguage
   } = useOutletContext<GlobalContext>();
   
+  const { t, i18n } = useTranslation();
+  const [languages, setLanguages] = useState<{code: string, name: string}[]>([]);
+  
+  useEffect(() => {
+    const fetchLangs = async () => {
+      try {
+        const res = await apiService.get("/api/languages");
+        if (res.ok) {
+          setLanguages(await res.json());
+        }
+      } catch (e) {
+        console.error("Fetch languages failed", e);
+      }
+    };
+    fetchLangs();
+  }, []);
   const [selectedPoi, setSelectedPoi] = useState<POIWithDistance | null>(null);
   const [selectedTour, setSelectedTour] = useState<Tour | null>(null);
 
@@ -47,20 +67,39 @@ export function InfoTab() {
     setEditTour(tour);
     setIsFormOpen(true);
   };
-  const lang = localStorage.getItem("user_lang") || "vi";
+  const lang = i18n.language || localStorage.getItem("user_lang") || "vi";
 
   // Helper: lấy tên POI theo ngôn ngữ hiện tại
-  const getPoiName = (poi: POIWithDistance): string => {
+  const getPoiName = (poi: any): string => {
     if (lang === "vi") return poi.name;
-    const t = poi.translations?.find(t => t.language_code === lang);
+    // Ưu tiên dùng field đã được flatten từ API
+    if (poi.translated_name) return poi.translated_name;
+    const t = poi.translations?.find((t: any) => t.language_code === lang);
     return t?.translated_name || poi.name;
   };
 
   // Helper: lấy mô tả POI theo ngôn ngữ hiện tại  
-  const getPoiDescription = (poi: POIWithDistance): string => {
+  const getPoiDescription = (poi: any): string => {
     if (lang === "vi") return poi.description;
-    const t = poi.translations?.find(t => t.language_code === lang);
+    if (poi.translated_description) return poi.translated_description;
+    const t = poi.translations?.find((t: any) => t.language_code === lang);
     return t?.translated_description || poi.description;
+  };
+
+  // Helper: lấy tên Tour theo ngôn ngữ hiện tại
+  const getTourName = (tour: Tour): string => {
+    if (lang === "vi") return tour.name;
+    if (tour.translated_name) return tour.translated_name;
+    const t = tour.translations?.find(t => t.language_code === lang);
+    return t?.translated_name || tour.name;
+  };
+
+  // Helper: lấy mô tả Tour theo ngôn ngữ hiện tại
+  const getTourDescription = (tour: Tour): string => {
+    if (lang === "vi") return tour.description || "";
+    if (tour.translated_description) return tour.translated_description;
+    const t = tour.translations?.find(t => t.language_code === lang);
+    return t?.translated_description || tour.description || "";
   };
 
   // Section 2: Tour đề xuất (Tours by Admin within 20km)
@@ -81,16 +120,31 @@ export function InfoTab() {
         <div className="flex items-center gap-3">
           <Globe className="text-blue-500" />
           <div>
-            <p className="text-sm text-gray-500">Ngôn ngữ hiện tại</p>
-            <p className="font-semibold text-gray-900">{lang.toUpperCase()}</p>
+            <p className="text-sm text-gray-500">{t("info.current_lang")}</p>
+            <p className="font-semibold text-gray-900">
+              {languages.find(l => l.code === lang)?.name || lang.toUpperCase()}
+            </p>
           </div>
         </div>
-        <button className="text-blue-600 font-medium text-sm px-3 py-1 rounded-lg bg-blue-50 active:bg-blue-100 transition-colors">Thay đổi</button>
+        <div className="relative">
+          <select 
+            value={lang}
+            onChange={(e) => changeLanguage(e.target.value)}
+            className="absolute inset-0 opacity-0 cursor-pointer w-full"
+          >
+            {languages.map(l => (
+              <option key={l.code} value={l.code}>{l.name}</option>
+            ))}
+          </select>
+          <button className="text-blue-600 font-medium text-sm px-3 py-1 rounded-lg bg-blue-50 active:bg-blue-100 transition-colors pointer-events-none">
+            {t("info.change")}
+          </button>
+        </div>
       </div>
 
       {/* Section 2: Tour đề xuất */}
       <h2 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
-        <Navigation size={20} className="text-green-500" /> Tour gần bạn (Đề xuất)
+        <Navigation size={20} className="text-green-500" /> {t("info.suggested_tours")}
       </h2>
       <div className="space-y-4 mb-8">
         {suggestedTours.map((tour) => {
@@ -108,7 +162,7 @@ export function InfoTab() {
               {thumbnail ? (
                 <img 
                   src={thumbnail} 
-                  alt={tour.name}
+                  alt={getTourName(tour)}
                   className="w-full h-32 object-cover"
                 />
               ) : (
@@ -118,8 +172,8 @@ export function InfoTab() {
               )}
               <div className="p-3 flex justify-between items-center">
                 <div>
-                  <h3 className="font-semibold text-gray-800">{tour.name}</h3>
-                  <p className="text-xs text-gray-500">{tour.poi_ids?.length || 0} điểm tham quan</p>
+                  <h3 className="font-semibold text-gray-800">{getTourName(tour)}</h3>
+                  <p className="text-xs text-gray-500">{tour.poi_ids?.length || 0} {t("info.attractions")}</p>
                 </div>
                 <ChevronRight size={18} className="text-gray-400" />
               </div>
@@ -128,7 +182,7 @@ export function InfoTab() {
         })}
         {suggestedTours.length === 0 && (
           <div className="p-4 bg-white/50 rounded-xl border border-dashed border-gray-300 text-center">
-            <p className="text-sm text-gray-400">Không có tour đề xuất nào gần đây.</p>
+            <p className="text-sm text-gray-400">{t("info.no_suggested_tours")}</p>
           </div>
         )}
       </div>
@@ -136,7 +190,7 @@ export function InfoTab() {
       {/* Section 3: POI gần đây */}
       {/* ... (Existing POI rendering remains unchanged) ... */}
       <h2 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
-        <MapPin size={20} className="text-red-500" /> Điểm tham quan gần bạn
+        <MapPin size={20} className="text-red-500" /> {t("info.nearby_pois")}
       </h2>
       <div className="space-y-3 mb-8">
         {nearbyPOIs.slice(0, 5).map((poi) => {
@@ -181,7 +235,7 @@ export function InfoTab() {
         {nearbyPOIs.length === 0 && (
            <div className="p-10 flex flex-col items-center justify-center opacity-40">
               <MapPin size={48} className="text-gray-300 animate-bounce mb-2" />
-              <p className="text-sm text-gray-500 italic">Đang tìm địa điểm quanh đây...</p>
+              <p className="text-sm text-gray-500 italic">{t("info.finding_pois")}</p>
            </div>
         )}
       </div>
@@ -189,13 +243,13 @@ export function InfoTab() {
       {/* Section 4: Tour của bạn */}
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-           <PlusCircle size={20} className="text-blue-500" /> Tour của tôi
+           <PlusCircle size={20} className="text-blue-500" /> {t("info.my_tours")}
         </h2>
         <button 
           onClick={handleOpenCreate}
           className="text-[10px] font-black text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full uppercase tracking-widest active:scale-95 transition-all"
         >
-          + Thêm Tour
+          {t("info.add_tour")}
         </button>
       </div>
       
@@ -221,8 +275,8 @@ export function InfoTab() {
                 )}
               </div>
               <div className="flex-1 min-w-0 pr-2">
-                <h3 className="font-bold text-gray-800 text-sm truncate">{tour.name}</h3>
-                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{tour.poi_ids?.length || 0} điểm dừng</p>
+                <h3 className="font-bold text-gray-800 text-sm truncate">{getTourName(tour)}</h3>
+                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{tour.poi_ids?.length || 0} {t("info.stops")}</p>
               </div>
               <ChevronRight size={16} className="text-gray-400 shrink-0" />
             </div>
@@ -230,12 +284,12 @@ export function InfoTab() {
         })}
         {myTours.length === 0 && (
           <div className="p-6 bg-white rounded-xl shadow-sm border border-gray-100 text-center flex flex-col items-center">
-            <p className="text-sm text-gray-500 mb-3 font-medium italic">Bạn chưa có tour nào.</p>
+            <p className="text-sm text-gray-500 mb-3 font-medium italic">{t("info.no_user_tours")}</p>
             <button 
               onClick={handleOpenCreate}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow-sm active:scale-95 transition-transform"
             >
-              Tạo tour ngay!
+              {t("info.create_tour_now")}
             </button>
           </div>
         )}

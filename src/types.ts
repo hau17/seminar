@@ -37,6 +37,8 @@ export interface POI {
   images?: POIImage[];
   audio_files?: POIAudioFile[];
   translations?: POITranslation[];
+  translated_name?: string;
+  translated_description?: string;
 }
 
 // ─── TOUR ────────────────────────────────────────────────────────────────────
@@ -57,6 +59,14 @@ export interface TourPOI {
   lng: number;
 }
 
+export interface TourTranslation {
+  id?: number;
+  tour_id: number;
+  language_code: string;
+  translated_name: string;
+  translated_description: string;
+}
+
 export interface Tour {
   id?: number;
   name: string;
@@ -68,6 +78,9 @@ export interface Tour {
   images?: TourImage[];
   pois?: TourPOI[];
   poi_ids?: number[];         // flattened for convenience
+  translations?: TourTranslation[];
+  translated_name?: string;
+  translated_description?: string;
 }
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────

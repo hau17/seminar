@@ -6,8 +6,10 @@ import { POI, Tour } from "../../types";
 import { useUserGPS } from "./hooks/useUserGPS";
 import { useAudioPlayer } from "./hooks/useAudioPlayer";
 import { syncAudioCache } from "../../services/audioCacheService";
+import { useTranslation } from "react-i18next";
 
 export function UserLayout() {
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -17,7 +19,7 @@ export function UserLayout() {
   const [mapFocusPoi, setMapFocusPoi] = useState<POI | null>(null);
   // isSyncing: true khi đang chạy Session Init → hiển thị màn hình chờ blocking
   const [isSyncing, setIsSyncing] = useState(true);
-  const [syncStatus, setSyncStatus] = useState("Đang tải dữ liệu...");
+  const [syncStatus, setSyncStatus] = useState(t("layout.sync.loading"));
 
   const userLang = localStorage.getItem("user_lang") || "vi";
   const userToken = localStorage.getItem("user_token");
@@ -33,7 +35,7 @@ export function UserLayout() {
     async function load() {
       try {
         // Bước 1: Lấy data POI + Tour
-        setSyncStatus("Đang tải dữ liệu...");
+        setSyncStatus(t("layout.sync.loading"));
         const [poisRes, toursRes] = await Promise.all([
           apiService.get("/api/user/pois/nearby"),
           apiService.get("/api/user/tours"),
@@ -47,7 +49,7 @@ export function UserLayout() {
 
         // Bước 2: Đồng bộ Cache Audio Version (dùng audioCacheService)
         if (!isCacheSynced.current) {
-          setSyncStatus("Đang đồng bộ cache...");
+          setSyncStatus(t("layout.sync.cache"));
           await syncAudioCache(poisData);
           isCacheSynced.current = true;
         }
@@ -55,7 +57,7 @@ export function UserLayout() {
         // Bước 3: Session Init — Dịch ngầm name + description
         // Chỉ chạy nếu ngôn ngữ không phải tiếng Việt VÀ đã đăng nhập
         if (userLang !== "vi" && userToken) {
-          setSyncStatus("Đang đồng bộ ngôn ngữ...");
+          setSyncStatus(t("layout.sync.lang"));
 
           // Lấy vị trí GPS hiện tại (best-effort, không block nếu từ chối)
           const getCoords = (): Promise<{ lat: number; lng: number } | null> =>
@@ -75,17 +77,19 @@ export function UserLayout() {
           const coords = await getCoords();
           if (coords) {
             try {
-              await apiService.post("/api/user/session-init", {
+              const initRes = await apiService.post("/api/user/session-init", {
                 language_code: userLang,
                 lat: coords.lat,
                 lng: coords.lng,
               });
-              // Reload POIs để lấy bản dịch mới nhất vào translations[]
-              const freshPoisRes = await apiService.get("/api/user/pois/nearby");
-              const freshPois = await freshPoisRes.json();
-              setPois(freshPois);
+              const initData = await initRes.json();
+              if (initData.success && initData.pois && initData.tours) {
+                // Sử dụng trực tiếp data đã được Backend dịch và làm phẳng
+                setPois(initData.pois);
+                setTours(initData.tours);
+              }
             } catch (e) {
-              console.warn("[Session Init] Lỗi dịch ngôn ngữ, bỏ qua:", e);
+              console.warn("[Session Init] Lỗi dịch ngôn ngữ, giữ data mặc định:", e);
             }
           }
         }
@@ -98,6 +102,55 @@ export function UserLayout() {
     }
     load();
   }, []);
+
+  const changeLanguage = async (code: string) => {
+    localStorage.setItem("user_lang", code);
+    i18n.changeLanguage(code);
+    setIsSyncing(true);
+    
+    try {
+      // Re-run the full sync sequence
+      const [poisRes, toursRes] = await Promise.all([
+        apiService.get("/api/user/pois/nearby"),
+        apiService.get("/api/user/tours"),
+      ]);
+      const poisData = await poisRes.json();
+      const toursData = await toursRes.json();
+      setPois(poisData);
+      setTours(toursData);
+
+      if (code !== "vi" && userToken) {
+        setSyncStatus(t("layout.sync.lang"));
+        const getCoords = (): Promise<{ lat: number; lng: number } | null> =>
+          new Promise((resolve) => {
+            if (!navigator.geolocation) return resolve(null);
+            navigator.geolocation.getCurrentPosition(
+              (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+              () => resolve(null),
+              { timeout: 5000 }
+            );
+          });
+
+        const coords = await getCoords();
+        if (coords) {
+          const initRes = await apiService.post("/api/user/session-init", {
+            language_code: code,
+            lat: coords.lat,
+            lng: coords.lng,
+          });
+          const initData = await initRes.json();
+          if (initData.success && initData.pois && initData.tours) {
+            setPois(initData.pois);
+            setTours(initData.tours);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Lỗi đổi ngôn ngữ:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const refreshData = async () => {
     try {
@@ -129,8 +182,8 @@ export function UserLayout() {
   };
 
   const tabs = [
-    { name: "Thông tin", path: "/user/info", icon: Info },
-    { name: "Bản đồ", path: "/user/map", icon: Map },
+    { name: t("layout.tabs.info"), path: "/user/info", icon: Info },
+    { name: t("layout.tabs.map"), path: "/user/map", icon: Map },
   ];
 
   // ── Màn hình blocking Session Init ──────────────────────────────────────────
@@ -141,7 +194,7 @@ export function UserLayout() {
           <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center animate-pulse">
             <Wifi size={40} className="text-white" />
           </div>
-          <h2 className="text-xl font-bold tracking-tight">GPS Tour Guide</h2>
+          <h2 className="text-xl font-bold tracking-tight">{t("layout.title")}</h2>
         </div>
         <div className="flex flex-col items-center gap-3 w-full max-w-xs">
           <div className="w-full bg-white/20 rounded-full h-1.5">
@@ -152,7 +205,7 @@ export function UserLayout() {
           </p>
         </div>
         <p className="text-xs text-blue-200 text-center max-w-xs">
-          Hệ thống đang chuẩn bị nội dung theo ngôn ngữ của bạn. Vui lòng chờ một chút...
+          {t("layout.sync.preparing")}
         </p>
       </div>
     );
@@ -162,7 +215,7 @@ export function UserLayout() {
   return (
     <div className="h-screen w-full flex flex-col bg-gray-50 relative">
       <header className="bg-blue-600 text-white p-4 shadow-md flex justify-between items-center z-10 shrink-0">
-        <h1 className="font-bold text-lg">GPS Tour Guide</h1>
+        <h1 className="font-bold text-lg">{t("layout.title")}</h1>
         <button
           onClick={handleLogout}
           className="p-2 bg-blue-700 rounded-full hover:bg-blue-800 transition"
@@ -203,6 +256,7 @@ export function UserLayout() {
             mapFocusPoi,
             setMapFocusPoi,
             refreshData,
+            changeLanguage,
           }}
         />
       </main>

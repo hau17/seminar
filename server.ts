@@ -172,6 +172,17 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tour_pois_tour ON tour_pois(tour_id, position);
   CREATE INDEX IF NOT EXISTS idx_tour_pois_poi  ON tour_pois(poi_id);
 
+  -- tour_translations
+  CREATE TABLE IF NOT EXISTS tour_translations (
+    tour_id                INTEGER NOT NULL,
+    language_code          TEXT    NOT NULL,
+    translated_name        TEXT,
+    translated_description TEXT,
+    created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tour_id, language_code),
+    FOREIGN KEY (tour_id) REFERENCES tours(id) ON DELETE CASCADE
+  );
+
   -- languages
   CREATE TABLE IF NOT EXISTS languages (
     code      TEXT    PRIMARY KEY,
@@ -326,11 +337,15 @@ function getToursWithDetails(tourRows: any[]) {
        WHERE tp.tour_id IN (${ids}) ORDER BY tp.tour_id, tp.position`
     )
     .all() as any[];
+  const translations = db
+    .prepare(`SELECT * FROM tour_translations WHERE tour_id IN (${ids})`)
+    .all() as any[];
   return tourRows.map((t) => ({
     ...t,
     images: images.filter((i) => i.tour_id === t.id),
     pois: pois.filter((p) => p.tour_id === t.id),
     poi_ids: pois.filter((p) => p.tour_id === t.id).map((p) => p.poi_id),
+    translations: translations.filter((tr) => tr.tour_id === t.id),
   }));
 }
 
@@ -540,6 +555,21 @@ async function startServer() {
     }
   });
 
+  // GET /api/languages - Lấy danh sách ngôn ngữ động từ DB
+  app.get("/api/languages", (req, res) => {
+    try {
+      const activeLanguages = db.prepare(`
+        SELECT code, name, tts_voice 
+        FROM languages 
+        WHERE is_active = 1
+      `).all();
+      res.json(activeLanguages);
+    } catch (e) {
+      console.error("GET /api/languages:", e);
+      res.status(500).json({ error: "Lỗi hệ thống khi lấy danh sách ngôn ngữ" });
+    }
+  });
+
   // POST /api/user/session-init — Dịch thuật ngầm (Session Init Background Job)
   // Dịch cả name + description cho:
   //   1. Tất cả POI trong bán kính 20km (lat/lng được gửi từ client)
@@ -579,32 +609,46 @@ async function startServer() {
         }
       }
 
-      // Bước 2: Tìm các Tour có ít nhất 1 POI trong 20km
-      // Lấy tất cả POI ID thuộc tour lân cận (có thể ngoài 20km)
+      // Bước 2: Tìm các POI ID thuộc tour lân cận (có thể ngoài 20km)
       const extraPoiIds = new Set<number>();
+      const targetTourIds = new Set<number>();
       if (nearbyPoiIds.size > 0) {
         const nearbyIdList = [...nearbyPoiIds].join(",");
-        const tourPoiRows = db.prepare(`
-          SELECT DISTINCT tp2.poi_id
-          FROM tour_pois tp1
-          JOIN tour_pois tp2 ON tp1.tour_id = tp2.tour_id
-          WHERE tp1.poi_id IN (${nearbyIdList})
-            AND tp2.poi_id NOT IN (${nearbyIdList})
+        
+        // Tìm các tour có POI gần đây
+        const tourRows = db.prepare(`
+          SELECT DISTINCT tour_id 
+          FROM tour_pois 
+          WHERE poi_id IN (${nearbyIdList})
         `).all() as any[];
-        for (const row of tourPoiRows) {
-          extraPoiIds.add(row.poi_id);
+
+        if (tourRows.length > 0) {
+          const tourIdList = tourRows.map(r => r.tour_id).join(",");
+          
+          // Lấy tất cả POI trong các tour này
+          const tourPoiRows = db.prepare(`
+            SELECT DISTINCT poi_id FROM tour_pois WHERE tour_id IN (${tourIdList})
+          `).all() as any[];
+          for (const row of tourPoiRows) {
+            if (!nearbyPoiIds.has(row.poi_id)) extraPoiIds.add(row.poi_id);
+          }
+
+          // Lọc ra các Tour của Admin để dịch
+          const adminTours = db.prepare(`
+            SELECT id, name, description FROM tours 
+            WHERE id IN (${tourIdList}) AND created_by_type = 'admin'
+          `).all() as any[];
+          for (const t of adminTours) targetTourIds.add(t.id);
         }
       }
 
-      // Tập hợp đầy đủ cần dịch
-      const allTargetIds = new Set([...nearbyPoiIds, ...extraPoiIds]);
+      // Chuẩn bị ngôn ngữ và biến đếm
+      const allTargetPoiIds = new Set([...nearbyPoiIds, ...extraPoiIds]);
       const transLang = language_code === "zh" ? "zh-CN" : language_code;
+      let translatedCount = 0;
 
-      const langRow = db.prepare("SELECT tts_voice FROM languages WHERE code=?").get(language_code) as any;
-      if (!langRow) return res.status(400).json({ error: "Ngôn ngữ không được hỗ trợ" });
-
-      let translated = 0;
-      for (const poiId of allTargetIds) {
+      // Bước A: Dịch POI
+      for (const poiId of allTargetPoiIds) {
         const existing = db.prepare(
           "SELECT id FROM poi_translations WHERE poi_id=? AND language_code=?"
         ).get(poiId, language_code) as any;
@@ -620,19 +664,91 @@ async function startServer() {
             db.prepare(
               "INSERT INTO poi_translations (poi_id, language_code, translated_name, translated_description) VALUES (?, ?, ?, ?)"
             ).run(poiId, language_code, translatedName, translatedDesc);
-            translated++;
+            translatedCount++;
           } catch (e) {
             console.error(`[Session Init] Lỗi dịch POI ${poiId}:`, e);
           }
         }
       }
 
+      // Bước B: Dịch Tour (Admin only)
+      if (targetTourIds.size > 0) {
+        const toursToTranslate = db.prepare(`
+          SELECT id, name, description FROM tours WHERE id IN (${[...targetTourIds].join(",")})
+        `).all() as any[];
+
+        for (const tour of toursToTranslate) {
+          const existing = db.prepare(
+            "SELECT tour_id FROM tour_translations WHERE tour_id=? AND language_code=?"
+          ).get(tour.id, language_code) as any;
+
+          if (!existing) {
+            try {
+              const [tName, tDesc] = await Promise.all([
+                runPythonScript("translate.py", ["--text", tour.name, "--lang", transLang]),
+                tour.description 
+                  ? runPythonScript("translate.py", ["--text", tour.description, "--lang", transLang])
+                  : Promise.resolve("")
+              ]);
+              db.prepare(
+                "INSERT INTO tour_translations (tour_id, language_code, translated_name, translated_description) VALUES (?, ?, ?, ?)"
+              ).run(tour.id, language_code, tName, tDesc);
+              translatedCount++;
+            } catch (e) {
+              console.error(`[Session Init] Lỗi dịch Tour ${tour.id}:`, e);
+            }
+          }
+        }
+      }
+
+      // Fetch fresh data for the user (All POIs for simplicity, or we could filter strictly)
+      // For POIs, we return all target POIs (nearby + tour related)
+      let finalPois: any[] = [];
+      if (allTargetPoiIds.size > 0) {
+        const poiRows = db.prepare(`SELECT * FROM pois WHERE id IN (${[...allTargetPoiIds].join(",")})`).all() as any[];
+        finalPois = getPoisWithImages(poiRows).map((p: any) => {
+          const t = p.translations?.find((tr: any) => tr.language_code === language_code);
+          return {
+            ...p,
+            translated_name: t?.translated_name || p.name,
+            translated_description: t?.translated_description || p.description
+          };
+        });
+      }
+
+      // For Tours, we return Admin tours in range AND the user's own tours
+      let finalTours: any[] = [];
+      const userTours = db.prepare(`
+        SELECT id FROM tours 
+        WHERE created_by_type = 'user' AND created_by_id = ?
+      `).all(req.user_id) as any[];
+      
+      const allTourIds = new Set([...targetTourIds, ...userTours.map(ut => ut.id)]);
+      console.log(`--- DEBUG TOUR TRANSLATION --- Found ${targetTourIds.size} nearby Admin tours, ${userTours.length} user tours. Total Unique: ${allTourIds.size}`);
+
+      if (allTourIds.size > 0) {
+        const tourRows = db.prepare(`SELECT * FROM tours WHERE id IN (${[...allTourIds].join(",")})`).all() as any[];
+        finalTours = getToursWithDetails(tourRows).map((t: any) => {
+          // Normalize matching language code (lowercase)
+          const tr = t.translations?.find((tr: any) => tr.language_code.toLowerCase() === language_code.toLowerCase());
+          const mapped = {
+            ...t,
+            translated_name: tr?.translated_name || t.name,
+            translated_description: tr?.translated_description || t.description || ""
+          };
+          console.log(`--- DEBUG TOUR TRANSLATION --- ID: ${t.id} | Name: ${t.name} -> ${mapped.translated_name} [Lang: ${language_code}]`);
+          return mapped;
+        });
+      }
+
+      console.log(`--- DEBUG SESSION INIT COMPLETE --- Sent ${finalPois.length} POIs and ${finalTours.length} Tours with current language: ${language_code}`);
+
       res.json({
         success: true,
-        translated,
-        nearby_count: nearbyPoiIds.size,
-        extra_tour_count: extraPoiIds.size,
-        message: `Đã dịch ${translated} POI mới cho ngôn ngữ ${language_code}`
+        translated: translatedCount,
+        message: `Đã hoàn tất đồng bộ nội dung cho ngôn ngữ ${language_code}`,
+        pois: finalPois,
+        tours: finalTours
       });
     } catch (e) {
       console.error("POST /api/user/session-init:", e);
@@ -849,6 +965,43 @@ async function startServer() {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // ON DEMAND TOUR TRANSLATION (CHỈ THUẦN TEXT - KHÔNG TTS)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.post("/api/tours/translate", adminAuth, async (req: any, res) => {
+    try {
+      const { tour_id, language_code } = req.body;
+      if (!tour_id || !language_code) return res.status(400).json({ error: "Missing payload" });
+
+      const tour = db.prepare("SELECT * FROM tours WHERE id = ?").get(tour_id) as any;
+      if (!tour) return res.status(404).json({ error: "Tour không tồn tại" });
+
+      if (language_code === "vi") {
+         return res.json({ success: true, translated_name: tour.name, translated_description: tour.description });
+      }
+
+      let trans = db.prepare("SELECT * FROM tour_translations WHERE tour_id=? AND language_code=?").get(tour_id, language_code) as any;
+      if (trans) {
+         return res.json({ success: true, translated_name: trans.translated_name, translated_description: trans.translated_description });
+      }
+
+      const targetLang = language_code === "zh" ? "zh-CN" : language_code;
+      const [transDesc, transName] = await Promise.all([
+         tour.description ? runPythonScript("translate.py", ["--text", tour.description, "--lang", targetLang]) : Promise.resolve(null),
+         runPythonScript("translate.py", ["--text", tour.name, "--lang", targetLang]),
+      ]);
+
+      db.prepare("INSERT INTO tour_translations (tour_id, language_code, translated_name, translated_description) VALUES (?, ?, ?, ?)")
+        .run(tour_id, language_code, transName, transDesc);
+
+      res.json({ success: true, translated_name: transName, translated_description: transDesc });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Internal error translation" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // ADMIN — DASHBOARD
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1001,31 +1154,48 @@ async function startServer() {
           ).run(poiId, `/uploads/pois/${f.filename}`, currentCount + idx);
         });
 
-        // AUDIO VERSIONING (Cache Invalidation)
-        const highestVerRow = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poiId) as any;
-        const newVersion = (highestVerRow ? highestVerRow.version : 0) + 1;
-        
-        // Delete all old audio files & translations
-        const oldAudios = db.prepare("SELECT file_path FROM poi_audio_files WHERE poi_id=?").all(poiId) as any[];
-        oldAudios.forEach((a) => deleteFile(a.file_path));
-        db.prepare("DELETE FROM poi_audio_files WHERE poi_id=?").run(poiId);
-        db.prepare("DELETE FROM poi_translations WHERE poi_id=?").run(poiId);
+        // ── OPTIMIZED SIDE EFFECTS (PRD v1.8) ──────────────────────────────
+        const nameChanged = nameVal !== poi.name;
+        const descChanged = descVal !== poi.description;
 
-        // Generate new Vietnamese audio async
-        const newFileName = `poi_${poiId}_vi_v${newVersion}.mp3`;
-        const newRelPath = `/uploads/audio/${newFileName}`;
-        const newAbsPath = path.join(audioDir, newFileName);
-        
-        const langRow = db.prepare("SELECT tts_voice FROM languages WHERE code='vi'").get() as any;
-        const viVoice = langRow ? langRow.tts_voice : 'vi-VN-HoaiMyNeural';
-        const pyProcess = spawn("python", ["scripts/tts.py", "--text", descVal, "--voice", viVoice, "--output", newAbsPath]);
-        pyProcess.on("close", (code) => {
-          if (code === 0) {
-            db.prepare("INSERT INTO poi_audio_files (poi_id, language_code, version, file_path) VALUES (?, 'vi', ?, ?)").run(poiId, newVersion, newRelPath);
-          }
-        });
+        // Về Audio: CHỈ tăng version & xóa/tạo lại khi description thay đổi
+        if (descChanged) {
+          const highestVerRow = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poiId) as any;
+          const newVersion = (highestVerRow ? highestVerRow.version : 0) + 1;
 
-        res.json({ success: true, audio_version: newVersion });
+          const oldAudios = db.prepare("SELECT file_path FROM poi_audio_files WHERE poi_id=?").all(poiId) as any[];
+          oldAudios.forEach((a) => deleteFile(a.file_path));
+          db.prepare("DELETE FROM poi_audio_files WHERE poi_id=?").run(poiId);
+
+          const newFileName = `poi_${poiId}_vi_v${newVersion}.mp3`;
+          const newRelPath = `/uploads/audio/${newFileName}`;
+          const newAbsPath = path.join(audioDir, newFileName);
+
+          const langRow = db.prepare("SELECT tts_voice FROM languages WHERE code='vi'").get() as any;
+          const viVoice = langRow ? langRow.tts_voice : 'vi-VN-HoaiMyNeural';
+          const pyProcess = spawn("python", ["scripts/tts.py", "--text", descVal, "--voice", viVoice, "--output", newAbsPath]);
+          pyProcess.on("close", (code) => {
+            if (code === 0) {
+              db.prepare("INSERT INTO poi_audio_files (poi_id, language_code, version, file_path) VALUES (?, 'vi', ?, ?)").run(poiId, newVersion, newRelPath);
+            }
+          });
+
+          // Về Dịch thuật: description đổi → xóa luôn bản dịch
+          db.prepare("DELETE FROM poi_translations WHERE poi_id=?").run(poiId);
+
+          res.json({ success: true, audio_version: newVersion });
+        } else if (nameChanged) {
+          // Chỉ đổi tên, không đổi mô tả: GIỮ NGUYÊN Audio, chỉ xóa bản dịch
+          db.prepare("DELETE FROM poi_translations WHERE poi_id=?").run(poiId);
+
+          const currentVerRow = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poiId) as any;
+          res.json({ success: true, audio_version: currentVerRow ? currentVerRow.version : 0 });
+        } else {
+          // Không đổi name/description: GIỮ NGUYÊN tất cả
+          const currentVerRow = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poiId) as any;
+          res.json({ success: true, audio_version: currentVerRow ? currentVerRow.version : 0 });
+        }
+
       } catch (e) {
         console.error("PUT /api/admin/pois/:id:", e);
         res.status(500).json({ error: "Lỗi cập nhật POI" });
@@ -1183,13 +1353,16 @@ app.delete("/api/admin/pois/business/:poi_id", adminAuth, (req: any, res) => {
 
         const { name, description, poi_ids, delete_image_ids } = req.body;
 
+        const newName = name?.trim() || tour.name;
+        const newDesc = description !== undefined ? (description?.trim() || null) : tour.description;
+
+        if (newName !== tour.name || newDesc !== tour.description) {
+           db.prepare("DELETE FROM tour_translations WHERE tour_id=?").run(tourId);
+        }
+
         db.prepare(
           "UPDATE tours SET name=?, description=?, updated_at=CURRENT_TIMESTAMP WHERE id=?"
-        ).run(
-          name?.trim() || tour.name,
-          description !== undefined ? (description?.trim() || null) : tour.description,
-          tourId
-        );
+        ).run(newName, newDesc, tourId);
 
         // Update POIs if provided
         if (poi_ids !== undefined) {
@@ -1387,11 +1560,14 @@ app.delete("/api/admin/pois/business/:poi_id", adminAuth, (req: any, res) => {
 
         const { name, description, lat, lng, range_m, delete_image_ids } = req.body;
 
+        const nameVal = name?.trim() || poi.name;
+        const descVal = description?.trim() || poi.description;
+
         db.prepare(
           "UPDATE pois SET name=?, description=?, lat=?, lng=?, range_m=?, updated_at=CURRENT_TIMESTAMP WHERE id=?"
         ).run(
-          name?.trim() || poi.name,
-          description?.trim() || poi.description,
+          nameVal,
+          descVal,
           lat !== undefined ? parseFloat(lat) : poi.lat,
           lng !== undefined ? parseFloat(lng) : poi.lng,
           range_m !== undefined ? parseInt(range_m) : poi.range_m,
@@ -1419,32 +1595,42 @@ app.delete("/api/admin/pois/business/:poi_id", adminAuth, (req: any, res) => {
           );
         });
 
-        // AUDIO VERSIONING (Cache Invalidation)
-        const highestVerRow = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poiId) as any;
-        const newVersion = (highestVerRow ? highestVerRow.version : 0) + 1;
-        
-        // Delete all old audio files & translations
-        const oldAudios = db.prepare("SELECT file_path FROM poi_audio_files WHERE poi_id=?").all(poiId) as any[];
-        oldAudios.forEach((a) => deleteFile(a.file_path));
-        db.prepare("DELETE FROM poi_audio_files WHERE poi_id=?").run(poiId);
-        db.prepare("DELETE FROM poi_translations WHERE poi_id=?").run(poiId);
+        // ── OPTIMIZED SIDE EFFECTS (PRD v1.8) ──────────────────────────────
+        const nameChanged = nameVal !== poi.name;
+        const descChanged = descVal !== poi.description;
 
-        // Generate new Vietnamese audio async
-        const newDesc = description?.trim() || poi.description;
-        const newFileName = `poi_${poiId}_vi_v${newVersion}.mp3`;
-        const newRelPath = `/uploads/audio/${newFileName}`;
-        const newAbsPath = path.join(audioDir, newFileName);
-        
-        const langRow = db.prepare("SELECT tts_voice FROM languages WHERE code='vi'").get() as any;
-        const viVoice = langRow ? langRow.tts_voice : 'vi-VN-HoaiMyNeural';
-        const pyProcess = spawn("python", ["scripts/tts.py", "--text", newDesc, "--voice", viVoice, "--output", newAbsPath]);
-        pyProcess.on("close", (code) => {
-          if (code === 0) {
-            db.prepare("INSERT INTO poi_audio_files (poi_id, language_code, version, file_path) VALUES (?, 'vi', ?, ?)").run(poiId, newVersion, newRelPath);
-          }
-        });
+        if (descChanged) {
+          const highestVerRow = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poiId) as any;
+          const newVersion = (highestVerRow ? highestVerRow.version : 0) + 1;
 
-        res.json({ success: true, audio_version: newVersion });
+          const oldAudios = db.prepare("SELECT file_path FROM poi_audio_files WHERE poi_id=?").all(poiId) as any[];
+          oldAudios.forEach((a) => deleteFile(a.file_path));
+          db.prepare("DELETE FROM poi_audio_files WHERE poi_id=?").run(poiId);
+
+          const newFileName = `poi_${poiId}_vi_v${newVersion}.mp3`;
+          const newRelPath = `/uploads/audio/${newFileName}`;
+          const newAbsPath = path.join(audioDir, newFileName);
+
+          const langRow = db.prepare("SELECT tts_voice FROM languages WHERE code='vi'").get() as any;
+          const viVoice = langRow ? langRow.tts_voice : 'vi-VN-HoaiMyNeural';
+          const pyProcess = spawn("python", ["scripts/tts.py", "--text", descVal, "--voice", viVoice, "--output", newAbsPath]);
+          pyProcess.on("close", (code) => {
+            if (code === 0) {
+              db.prepare("INSERT INTO poi_audio_files (poi_id, language_code, version, file_path) VALUES (?, 'vi', ?, ?)").run(poiId, newVersion, newRelPath);
+            }
+          });
+
+          db.prepare("DELETE FROM poi_translations WHERE poi_id=?").run(poiId);
+          res.json({ success: true, audio_version: newVersion });
+        } else if (nameChanged) {
+          db.prepare("DELETE FROM poi_translations WHERE poi_id=?").run(poiId);
+          const currentVerRow = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poiId) as any;
+          res.json({ success: true, audio_version: currentVerRow ? currentVerRow.version : 0 });
+        } else {
+          const currentVerRow = db.prepare("SELECT version FROM poi_audio_files WHERE poi_id=? ORDER BY version DESC LIMIT 1").get(poiId) as any;
+          res.json({ success: true, audio_version: currentVerRow ? currentVerRow.version : 0 });
+        }
+
       } catch (e) {
         console.error("PUT /api/business/pois/:id:", e);
         res.status(500).json({ error: "Lỗi cập nhật POI" });

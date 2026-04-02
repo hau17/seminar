@@ -1,0 +1,39 @@
+{
+  "login": {
+    "title": "游客登录",
+    "email": "电子邮件",
+    "password": "密码",
+    "language": "显示语言及音频",
+    "submit": "登录",
+    "submitting": "登录中...",
+    "no_account": "没有账号？",
+    "register_now": "立即注册"
+  },
+  "info": {
+    "current_lang": "当前语言",
+    "change": "更改",
+    "suggested_tours": "附近的旅游路线（推荐）",
+    "nearby_pois": "附近的景点",
+    "my_tours": "我的路线",
+    "add_tour": "+ 添加路线",
+    "no_suggested_tours": "附近没有推荐的旅游路线。",
+    "finding_pois": "正在寻找附近的地点...",
+    "no_user_tours": "您还没有任何旅游路线。",
+    "create_tour_now": "立即创建路线！",
+    "stops": "个站点",
+    "attractions": "个景点"
+  },
+  "layout": {
+    "title": "GPS导游系统",
+    "tabs": {
+      "info": "信息",
+      "map": "地图"
+    },
+    "sync": {
+      "loading": "正在加载数据...",
+      "cache": "正在同步缓存...",
+      "lang": "正在同步语言...",
+      "preparing": "系统正在准备对应语言的内容，请稍候..."
+    }
+  }
+}

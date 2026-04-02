@@ -1,0 +1,39 @@
+{
+  "login": {
+    "title": "게스트 로그인",
+    "email": "이메일",
+    "password": "비밀번호",
+    "language": "표시 언어 및 오디오",
+    "submit": "로그인",
+    "submitting": "로그인 중...",
+    "no_account": "계정이 없으신가요?",
+    "register_now": "지금 가입하세요"
+  },
+  "info": {
+    "current_lang": "현재 언어",
+    "change": "변경",
+    "suggested_tours": "주변 투어 (추천)",
+    "nearby_pois": "주변 명소",
+    "my_tours": "내 투어",
+    "add_tour": "+ 투어 추가",
+    "no_suggested_tours": "주변에 추천 투어가 없습니다.",
+    "finding_pois": "주변 장소를 찾는 중...",
+    "no_user_tours": "투어가 없습니다.",
+    "create_tour_now": "지금 투어를 만들어 보세요!",
+    "stops": "개 경유지",
+    "attractions": "개 명소"
+  },
+  "layout": {
+    "title": "GPS 투어 가이드",
+    "tabs": {
+      "info": "정보",
+      "map": "지도"
+    },
+    "sync": {
+      "loading": "데이터를 불러오는 중...",
+      "cache": "캐시 동기화 중...",
+      "lang": "언어 동기화 중...",
+      "preparing": "선택하신 언어로 콘텐츠를 준비 중입니다. 잠시만 기다려 주세요..."
+    }
+  }
+}

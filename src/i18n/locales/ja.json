@@ -1,0 +1,39 @@
+{
+  "login": {
+    "title": "ゲストログイン",
+    "email": "メールアドレス",
+    "password": "パスワード",
+    "language": "表示言語とオーディオ",
+    "submit": "ログイン",
+    "submitting": "ログイン中...",
+    "no_account": "アカウントをお持ちでないですか？",
+    "register_now": "今すぐ登録"
+  },
+  "info": {
+    "current_lang": "現在の言語",
+    "change": "変更",
+    "suggested_tours": "近くのツアー（推奨）",
+    "nearby_pois": "近くの観光スポット",
+    "my_tours": "マイツアー",
+    "add_tour": "+ ツアーを追加",
+    "no_suggested_tours": "近くに推奨ツアーはありません。",
+    "finding_pois": "近くの場所を探しています...",
+    "no_user_tours": "ツアーはまだありません。",
+    "create_tour_now": "今すぐツアーを作成しましょう！",
+    "stops": "か所",
+    "attractions": "か所の観光スポット"
+  },
+  "layout": {
+    "title": "GPSツアーガイド",
+    "tabs": {
+      "info": "情報",
+      "map": "地図"
+    },
+    "sync": {
+      "loading": "データを読み込み中...",
+      "cache": "キャッシュを同期中...",
+      "lang": "言語を同期中...",
+      "preparing": "お選びの言語に合わせてコンテンツを準備しています。少々お待ちください..."
+    }
+  }
+}

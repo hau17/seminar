@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { X, Globe } from 'lucide-react';
 import { POI } from '../../types';
 import { useAudioGenerate } from '../../hooks/useAudioGenerate';
+import { apiService } from '../../services/api';
 
 interface PoiAudioModalProps {
   poi: POI;
@@ -10,16 +11,39 @@ interface PoiAudioModalProps {
   onClose: () => void;
 }
 
-const LANGUAGES = [
-  { code: 'vi', label: 'Tiếng Việt' },
-  { code: 'en', label: 'English' },
-  { code: 'zh', label: '中文' },
-  { code: 'ja', label: '日本語' },
-  { code: 'ko', label: '한국어' },
-];
-
 export function PoiAudioModal({ poi, token, onClose }: PoiAudioModalProps) {
-  const [selectedLang, setSelectedLang] = useState('vi');
+  const defaultLang = localStorage.getItem("user_lang") || (navigator.language.startsWith("vi") ? "vi" : "en");
+  const [selectedLang, setSelectedLang] = useState(defaultLang);
+  const [languages, setLanguages] = useState<{code: string, name: string}[]>([]);
+  const [fetchingLangs, setFetchingLangs] = useState(true);
+
+  useEffect(() => {
+    localStorage.setItem("user_lang", selectedLang);
+  }, [selectedLang]);
+
+  useEffect(() => {
+    const fetchLanguages = async () => {
+      try {
+        const res = await apiService.get('/api/languages');
+        if (res.ok) {
+          const data = await res.json();
+          setLanguages(data);
+          
+          if (data.length > 0 && !data.find((l: any) => l.code === defaultLang)) {
+            setSelectedLang(data[0].code);
+          }
+        } else {
+          setLanguages([{ code: "vi", name: "Tiếng Việt" }, { code: "en", name: "English" }]);
+        }
+      } catch (error) {
+        setLanguages([{ code: "vi", name: "Tiếng Việt" }, { code: "en", name: "English" }]);
+      } finally {
+        setFetchingLangs(false);
+      }
+    };
+    fetchLanguages();
+  }, [defaultLang]);
+
   const { audioUrl, translatedName, translatedText, loading } = useAudioGenerate(poi, token, selectedLang);
 
   return (
@@ -50,11 +74,15 @@ export function PoiAudioModal({ poi, token, onClose }: PoiAudioModalProps) {
               className="w-full border border-slate-200 p-2.5 rounded-lg text-sm focus:outline-none focus:border-emerald-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed bg-slate-50"
               value={selectedLang} 
               onChange={(e) => setSelectedLang(e.target.value)}
-              disabled={loading}
+              disabled={loading || fetchingLangs}
             >
-              {LANGUAGES.map(l => (
-                <option key={l.code} value={l.code}>{l.label}</option>
-              ))}
+              {fetchingLangs ? (
+                <option value={selectedLang}>Đang tải...</option>
+              ) : (
+                languages.map(l => (
+                  <option key={l.code} value={l.code}>{l.name}</option>
+                ))
+              )}
             </select>
           </div>
 

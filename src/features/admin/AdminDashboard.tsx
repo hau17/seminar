@@ -34,6 +34,7 @@ import { POIDetailModal } from "../poi/POIDetailModal";
 import { validatePOI, validateTour } from "../../utils/validation";
 import { usePOIs } from "../../hooks/usePOIs";
 import { useTours } from "../../hooks/useTours";
+import { AdminTourDetailModal } from "./AdminTourDetailModal";
 
 // Fix Leaflet marker icons
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -221,6 +222,7 @@ export function AdminDashboard() {
   const [tourSearchText, setTourSearchText] = useState("");
   const [tourPoiSearchText, setTourPoiSearchText] = useState("");
   const [showTourModal, setShowTourModal] = useState(false);
+  const [viewingTour, setViewingTour] = useState<Tour | null>(null);
 
   // Tour form state
   const [tourForm, setTourForm] = useState<Partial<Tour>>({
@@ -239,7 +241,7 @@ export function AdminDashboard() {
 
   // ── Hooks ────────────────────────────────────────────────────────────────────
   const { pois, loading: loadingPois, fetchPois, savePoi, deletePoi, deleteBusinessPoi } = usePOIs(authToken);
-  const { tours, loading: loadingTours, fetchTours, saveTour, deleteTour } = useTours(authToken);
+  const { tours, loading: loadingTours, fetchTours, saveTour, deleteTour, translateTour } = useTours(authToken);
 
   // ─── Toast helpers ────────────────────────────────────────────────────────────
   const showToast = (message: string, type: "error" | "success" = "error") => {
@@ -671,9 +673,10 @@ export function AdminDashboard() {
                 filteredTours.map((tour) => (
                   <div
                     key={tour.id}
-                    onClick={() =>
-                      setSelectedTourId(selectedTourId === tour.id ? null : tour.id!)
-                    }
+                    onClick={() => {
+                      setSelectedTourId(selectedTourId === tour.id ? null : tour.id!);
+                      setViewingTour(tour);
+                    }}
                     className={cn(
                       "p-3 rounded-xl border cursor-pointer transition-all group",
                       selectedTourId === tour.id
@@ -852,6 +855,17 @@ export function AdminDashboard() {
               onClose={() => setSelectedPoi(null)}
               onEdit={selectedPoi.owner_type === "admin" ? () => openPoiEdit(selectedPoi) : undefined}
               onDelete={() => handleDeletePoi(selectedPoi)}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* ── Tour Info Modal (read-only view / multi-language) ─────────────────────────────── */}
+        <AnimatePresence>
+          {viewingTour && !isEditingTour && !isCreatingTour && (
+            <AdminTourDetailModal
+              tour={tours.find(t => t.id === viewingTour.id) || viewingTour}
+              onClose={() => setViewingTour(null)}
+              token={authToken}
             />
           )}
         </AnimatePresence>

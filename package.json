@@ -3,14 +3,16 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-"scripts": {
-    "dev:web": "vite --host",
+  "scripts": {
+    "dev:web": "vite",
+    "dev:demo": "vite --mode demo",
     "dev:server": "tsx --tsconfig ./tsconfig.server.json server.ts",
     "build": "vite build",
     "preview": "vite preview --host",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
-  },  "dependencies": {
+  },
+  "dependencies": {
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/leaflet": "^1.9.21",
@@ -22,6 +24,7 @@
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^12.10.0",
+    "i18next": "^26.0.3",
     "jsonwebtoken": "^9.0.2",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.546.0",
@@ -32,6 +35,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-firebase-hooks": "^5.1.1",
+    "react-hot-toast": "^2.6.0",
+    "react-i18next": "^17.0.2",
     "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.13.1",
     "tailwind-merge": "^3.5.0",
