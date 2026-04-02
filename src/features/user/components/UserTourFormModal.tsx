@@ -11,6 +11,16 @@ interface UserTourFormModalProps {
   onSuccess: () => void;
 }
 
+import { useTranslation } from "react-i18next";
+
+interface UserTourFormModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  initialData?: Tour | null;
+  allPois: POI[];
+  onSuccess: () => void;
+}
+
 export function UserTourFormModal({ 
   isOpen, 
   onClose, 
@@ -18,6 +28,7 @@ export function UserTourFormModal({
   allPois, 
   onSuccess 
 }: UserTourFormModalProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState(initialData?.name || "");
   const [selectedPois, setSelectedPois] = useState<POI[]>(() => {
     if (!initialData?.poi_ids) return [];
@@ -54,11 +65,11 @@ export function UserTourFormModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setError("Vui lòng nhập tên tour");
+      setError(t("tour.tour_name_required"));
       return;
     }
     if (selectedPois.length === 0) {
-      setError("Vui lòng chọn ít nhất 1 điểm tham quan");
+      setError(t("tour.select_pois"));
       return;
     }
 
@@ -98,9 +109,9 @@ export function UserTourFormModal({
         <header className="p-6 pb-4 flex items-center justify-between border-b border-gray-50">
           <div>
             <h2 className="text-xl font-black text-gray-900 leading-tight">
-              {initialData ? "Cập nhật Tour" : "Tạo Lộ trình mới"}
+              {initialData ? t("tour.update_itinerary") : t("tour.create_new_itinerary")}
             </h2>
-            <p className="text-xs text-gray-400 font-medium mt-0.5">Tiêu chuẩn BR-17 (Hội Hội An)</p>
+            <p className="text-xs text-gray-400 font-medium mt-0.5">{t("tour.standard_notice")}</p>
           </div>
           <button onClick={onClose} className="p-2 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors">
             <X size={20} className="text-gray-500" />
@@ -111,12 +122,12 @@ export function UserTourFormModal({
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
             {/* Name Input */}
             <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 px-1">Tên Tour (Bắt buộc)</label>
+              <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 px-1">{t("tour.tour_name_required")}</label>
               <input 
                 type="text" 
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Ví dụ: Hội An 1 ngày, Tour đêm..."
+                placeholder={t("tour.tour_name_placeholder")}
                 className="w-full px-5 py-4 bg-gray-50 rounded-2xl border border-transparent focus:bg-white focus:border-blue-500 outline-none transition-all font-bold text-gray-800"
               />
             </div>
@@ -124,9 +135,9 @@ export function UserTourFormModal({
             {/* POI Picker */}
             <div className="space-y-3">
               <div className="flex items-center justify-between px-1">
-                <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Chọn điểm tham quan</label>
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">{t("tour.select_pois")}</label>
                 <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                  Đã chọn {selectedPois.length} điểm
+                  {t("tour.pois_selected", { count: selectedPois.length })}
                 </span>
               </div>
 
@@ -137,7 +148,7 @@ export function UserTourFormModal({
                   type="text" 
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Tìm kiếm điểm đến..."
+                  placeholder={t("tour.search_placeholder")}
                   className="w-full pl-12 pr-5 py-3.5 bg-gray-50 rounded-2xl border border-transparent focus:bg-white focus:border-blue-500 outline-none transition-all text-sm font-medium"
                 />
               </div>
@@ -165,7 +176,9 @@ export function UserTourFormModal({
                       </div>
                       <div className="flex-1 min-w-0">
                         <h4 className="font-bold text-gray-800 text-sm truncate">{poi.name}</h4>
-                        <p className="text-[10px] text-gray-400 font-medium">{Math.round((poi as any).distance || 0)}m gần bạn</p>
+                        <p className="text-[10px] text-gray-400 font-medium">
+                          {t("tour.distance_nearby", { distance: Math.round((poi as any).distance || 0) })}
+                        </p>
                       </div>
                       {isSelected && <Check size={18} className="text-blue-600 mr-2" />}
                     </div>
@@ -177,7 +190,7 @@ export function UserTourFormModal({
             {/* Selected Sequence Preview */}
             {selectedPois.length > 0 && (
               <div className="bg-gray-50 rounded-2xl p-4 border border-dashed border-gray-200">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Lộ trình dự kiến</p>
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">{t("tour.my_itinerary")}</p>
                 <div className="flex flex-wrap gap-2 items-center">
                    {selectedPois.map((p, i) => (
                      <span key={p.id} className="flex items-center gap-2">
@@ -202,10 +215,10 @@ export function UserTourFormModal({
               {loading ? (
                 <Loader2 className="animate-spin" size={20} />
               ) : (
-                <><Save size={20} /> {initialData ? "Lưu thay đổi" : "Tạo lộ trình"}</>
+                <><Save size={20} /> {initialData ? t("tour.save_changes") : t("tour.create_itinerary")}</>
               )}
             </button>
-            <p className="text-[10px] text-gray-400 text-center font-medium">Bạn có thể thay đổi lộ trình này bất cứ lúc nào</p>
+            <p className="text-[10px] text-gray-400 text-center font-medium">{t("tour.change_anytime")}</p>
           </footer>
         </form>
       </div>

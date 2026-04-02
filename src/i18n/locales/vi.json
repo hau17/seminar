@@ -35,5 +35,34 @@
       "lang": "Đang đồng bộ ngôn ngữ...",
       "preparing": "Hệ thống đang chuẩn bị nội dung theo ngôn ngữ của bạn. Vui lòng chờ một chút..."
     }
+  },
+  "tour": {
+    "itinerary_details": "Chi tiết hành trình",
+    "itinerary_stops": "Lộ trình ({{count}} điểm dừng)",
+    "click_for_details": "nhấn để xem chi tiết",
+    "show_on_map": "xem trình diễn trên bản đồ",
+    "view_on_map": "Xem trên bản đồ",
+    "create_new_itinerary": "Tạo Lộ trình mới",
+    "update_itinerary": "Cập nhật Tour",
+    "standard_notice": "Tiêu chuẩn BR-17 (Hội Hội An)",
+    "tour_name_required": "Tên Tour (Bắt buộc)",
+    "tour_name_placeholder": "Ví dụ: Hội An 1 ngày, Tour đêm...",
+    "select_pois": "Chọn điểm tham quan",
+    "pois_selected": "Đã chọn {{count}} điểm",
+    "search_placeholder": "Tìm kiếm điểm đến...",
+    "distance_nearby": "{{distance}}m gần bạn",
+    "create_itinerary": "Tạo lộ trình",
+    "save_changes": "Lưu thay đổi",
+    "change_anytime": "Bạn có thể thay đổi lộ trình này bất cứ lúc nào",
+    "delete_confirm": "Bạn có chắc chắn muốn xóa tour này?",
+    "delete_fail": "Không thể xóa tour. Vui lòng thử lại.",
+    "no_pois": "Tour chưa có điểm POI nào.",
+    "my_itinerary": "Lộ trình của tôi",
+    "edit_tour": "Sửa tour",
+    "delete_tour": "Xóa bỏ"
+  },
+  "poi": {
+    "now_playing": "Đang phát: {{name}}",
+    "distance_away": "Cách bạn {{distance}}m"
   }
 }

@@ -35,5 +35,34 @@
       "lang": "Syncing language...",
       "preparing": "The system is preparing content for your language. Please wait a moment..."
     }
+  },
+  "tour": {
+    "itinerary_details": "Itinerary details",
+    "itinerary_stops": "Route ({{count}} stops)",
+    "click_for_details": "click for details",
+    "show_on_map": "show on map",
+    "view_on_map": "View on map",
+    "create_new_itinerary": "Create New Itinerary",
+    "update_itinerary": "Update Tour",
+    "standard_notice": "Standard BR-17 (Hoi An Society)",
+    "tour_name_required": "Tour Name (Required)",
+    "tour_name_placeholder": "Example: Hoi An 1 day, Night tour...",
+    "select_pois": "Select attractions",
+    "pois_selected": "{{count}} points selected",
+    "search_placeholder": "Search destination...",
+    "distance_nearby": "{{distance}}m nearby",
+    "create_itinerary": "Create itinerary",
+    "save_changes": "Save changes",
+    "change_anytime": "You can change this itinerary at any time",
+    "delete_confirm": "Are you sure you want to delete this tour?",
+    "delete_fail": "Could not delete tour. Please try again.",
+    "no_pois": "No POI in this tour yet.",
+    "my_itinerary": "My Itinerary",
+    "edit_tour": "Edit tour",
+    "delete_tour": "Delete"
+  },
+  "poi": {
+    "now_playing": "Now playing: {{name}}",
+    "distance_away": "{{distance}}m away"
   }
 }

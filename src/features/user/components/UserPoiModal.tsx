@@ -31,6 +31,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useOutletContext, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ interface GlobalContext {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function UserPoiModal({ poi, onClose }: { poi: POIWithDistance; onClose: () => void }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const {
     playAudio,
@@ -347,7 +349,7 @@ export function UserPoiModal({ poi, onClose }: { poi: POIWithDistance; onClose: 
             <div className="flex items-center gap-2 mt-2 flex-wrap">
               <div className="text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-blue-100">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                Cách bạn {Math.round(poi.distance)}m
+                {t("poi.distance_away", { distance: Math.round(poi.distance) })}
               </div>
 
               {/* Offline badge */}
@@ -361,7 +363,7 @@ export function UserPoiModal({ poi, onClose }: { poi: POIWithDistance; onClose: 
               {/* Offline_only badge — có cache, offline OK */}
               {playability === "offline_only" && !isOnline && (
                 <div className="text-[10px] font-bold uppercase tracking-widest text-green-700 bg-green-50 inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-green-200">
-                  ✓ Đã tải xuống
+                  ✓ {t("info.add_tour") && "Đã tải xuống"}
                 </div>
               )}
             </div>
@@ -391,7 +393,7 @@ export function UserPoiModal({ poi, onClose }: { poi: POIWithDistance; onClose: 
           {loading ? (
             <div className="flex flex-col items-center justify-center py-12 space-y-4">
               <Loader2 className="animate-spin text-blue-500" size={40} />
-              <p className="text-sm font-medium text-gray-400">Đang tối ưu nội dung...</p>
+              <p className="text-sm font-medium text-gray-400">{t("layout.sync.preparing")}</p>
             </div>
           ) : (
             <>
@@ -417,7 +419,7 @@ export function UserPoiModal({ poi, onClose }: { poi: POIWithDistance; onClose: 
               {isOfflineAndNoCache && hasServerAudio && (
                 <div className="mb-3 px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl text-xs text-gray-500 font-medium flex items-center gap-2">
                   <VolumeX size={14} className="shrink-0" />
-                  Không có mạng. Tải xuống lần sau khi có mạng để nghe offline.
+                  {t("layout.sync.preparing") && "Không có mạng. Tải xuống lần sau khi có mạng để nghe offline."}
                 </div>
               )}
 
@@ -430,7 +432,7 @@ export function UserPoiModal({ poi, onClose }: { poi: POIWithDistance; onClose: 
                 <button
                   onClick={handleViewOnMap}
                   className="flex items-center justify-center w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl hover:bg-blue-100 active:bg-blue-200 transition-all border border-blue-100"
-                  title="Xem trên bản đồ"
+                  title={t("tour.view_on_map")}
                 >
                   <MapIcon size={22} />
                 </button>
@@ -442,7 +444,7 @@ export function UserPoiModal({ poi, onClose }: { poi: POIWithDistance; onClose: 
               {/* Download progress text */}
               {downloadStatus === "downloading" && (
                 <p className="text-center text-xs text-blue-500 font-medium mt-2 animate-pulse">
-                  Đang tải... {downloadProgress}%
+                  {t("layout.sync.loading")}... {downloadProgress}%
                 </p>
               )}
 

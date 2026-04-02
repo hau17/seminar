@@ -228,7 +228,7 @@ export function UserLayout() {
       {isPlaying && currentAudioPoi && (
         <div className="bg-green-100 text-green-800 px-4 py-2 text-sm text-center flex items-center justify-center shrink-0">
           <span className="animate-pulse mr-2 w-2 h-2 rounded-full bg-green-500"></span>
-          Đang phát: {currentAudioPoi.name}
+          {t("poi.now_playing", { name: currentAudioPoi.translated_name || currentAudioPoi.name })}
         </div>
       )}
 

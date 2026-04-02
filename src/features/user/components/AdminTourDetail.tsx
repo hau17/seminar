@@ -5,6 +5,8 @@ import { POIWithDistance } from "../hooks/useUserGPS";
 import { useState } from "react";
 import { UserPoiModal } from "./UserPoiModal";
 
+import { useTranslation } from "react-i18next";
+
 interface AdminTourDetailProps {
   tour: Tour;
   onClose: () => void;
@@ -14,6 +16,7 @@ interface AdminTourDetailProps {
 }
 
 export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocusPoi, nearbyPOIs }: AdminTourDetailProps) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const [selectedPoi, setSelectedPoi] = useState<POIWithDistance | null>(null);
@@ -44,7 +47,7 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
   const translatedDescription = tour.translated_description
     || tour.translations?.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.translated_description 
     || tour.description 
-    || "Chưa có mô tả cho tour này.";
+    || t("info.no_suggested_tours");
   const headerThumbnail = tourImage || poiImage;
 
   return (
@@ -76,7 +79,7 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
             {/* Description Section */}
             <section>
               <h3 className="text-sm font-bold text-blue-600 uppercase tracking-widest mb-2 flex items-center gap-2">
-                <Info size={16} /> Chi tiết hành trình
+                <Info size={16} /> {t("tour.itinerary_details")}
               </h3>
               <p className="text-gray-600 text-sm leading-relaxed bg-blue-50/50 p-3 rounded-xl border border-blue-100">
                 {translatedDescription}
@@ -86,7 +89,7 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
             {/* Tour Images Gallery */}
             {tour.images && tour.images.length > 0 && (
               <section>
-                <h3 className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em] mb-3">Hình ảnh hành trình</h3>
+                <h3 className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em] mb-3">{t("info.attractions")}</h3>
                 <div className="flex gap-2 overflow-x-auto pb-2 snap-x no-scrollbar">
                   {tour.images.map((img, idx) => (
                     <div 
@@ -103,7 +106,9 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
 
             {/* POI List Section */}
             <section>
-              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-3">Lộ trình ({tour.pois?.length || 0} điểm dừng)</h3>
+              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-3">
+                {t("tour.itinerary_stops", { count: tour.pois?.length || 0 })}
+              </h3>
               <div className="space-y-3">
                 {tour.pois?.sort((a, b) => a.position - b.position).map((tp) => {
                   // Hiển thị tên đã dịch nếu có, fallback về tp.name
@@ -121,7 +126,7 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
                       </div>
                       <div className="flex-1 min-w-0">
                         <h4 className="font-bold text-gray-800 text-sm truncate">{displayName}</h4>
-                        <p className="text-[10px] text-gray-400 font-medium">Nhấn để xem chi tiết</p>
+                        <p className="text-[10px] text-gray-400 font-medium">{t("tour.click_for_details")}</p>
                       </div>
                       <ChevronRight size={16} className="text-gray-300 group-hover:text-blue-500 transition-colors" />
                     </div>
@@ -138,7 +143,7 @@ export function AdminTourDetail({ tour, onClose, setHighlightedTour, setMapFocus
               className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center gap-3 shadow-[0_8px_20px_-6px_rgba(37,99,235,0.6)] active:scale-95 hover:bg-blue-700 transition-all"
             >
               <Map size={20} />
-              Xem trình diễn trên bản đồ
+              {t("tour.show_on_map")}
             </button>
           </div>
         </div>

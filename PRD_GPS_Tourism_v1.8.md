@@ -643,19 +643,27 @@ Giống quy luật của Admin, cửa sổ sửa POI cho Doanh nghiệp cho sử
 ### 7.2 Đăng nhập User & Khởi tạo App (Session Init)
 
 **Thời điểm thực hiện (Session Init):**
+- Ngay khi người dùng khởi động App (trước khi đăng nhập).
 - Ngay sau khi người dùng thực hiện **Đăng nhập** thành công.
 - Ngay sau khi **mở lại App** (trường hợp đã có sẵn JWT Token hợp lệ).
 
 **Quy trình thực hiện:**
 
-1. Nếu là đăng nhập mới: `POST /api/auth/user/login` với `{ email, password, language_code }`. Lưu JWT token + `language_code` vào storage.
-2. **Background job (Session Init - Thực hiện DUY NHẤT 1 LẦN):**
+1. **Xác định ngôn ngữ mặc định (Auto-detect Language):**
+   - Thực hiện ngay tại thời điểm khởi tạo App.
+   - Hệ thống đọc ngôn ngữ hệ thống của thiết bị (`system locale` / `navigator.language`).
+   - Cắt lấy mã code cơ bản (Ví dụ: `en-US` -> `en`).
+   - So khớp mã code này với danh sách ngôn ngữ fetch về từ API Database.
+   - **Nếu CÓ TRONG danh sách:** Tự động chọn ngôn ngữ đó làm mặc định.
+   - **Nếu KHÔNG CÓ:** Tự động chọn Tiếng Anh (`en`) làm ngôn ngữ mặc định.
+2. Nếu là đăng nhập mới: `POST /api/auth/user/login` với `{ email, password, language_code }`. Lưu JWT token + `language_code` vào storage.
+3. **Background job (Session Init - Thực hiện DUY NHẤT 1 LẦN):**
    - **Sync Version:** Gửi danh sách POI ID/Version hiện băm ở Local Cache lên Server (hoặc lấy danh sách POI gần nhất từ Server kèm Version mới nhất). Thực hiện đối chiếu toàn diện: Nếu `local_version` < `server_version`, đánh dấu cần xóa/tải lại.
    - **Dịch thuật (POI & Tour):** 
      - **POI:** Truy vấn tất cả POI trong bán kính 20km (hoặc POI thuộc Tour gần đó). Kiểm tra/tạo bản dịch (áp dụng cho CẢ `name` và `description`) cho `language_code` đang thiết lập nếu chưa có trong bảng `poi_translations`.
      - **Tour:** Truy vấn các Tour (do Admin tạo) trong phạm vi 20km. Kiểm tra và tự động trigger tiến trình gọi API On-demand (**CHỈ dùng script `translate.py`** để dịch chữ, **TUYỆT ĐỐI KHÔNG dùng `tts.py`**) để tạo bản dịch cho "Tên Tour" và "Mô tả Tour" theo `language_code` của thiết bị nếu bản dịch chưa tồn tại trong bảng `tour_translations`.
-3. **UX (Quy tắc hiển thị):** Hệ thống bắt buộc hiển thị màn hình chờ "Đang đồng bộ dữ liệu..." và **CHỈ BẮT ĐẦU HIỂN THỊ** màn hình chính / danh sách POI (với tên và mô tả đã được dịch) **SAU KHI** tiến trình dịch thuật này hoàn tất 100%.
-4. Sau khi hoàn thành → Vào màn hình chính. Kể từ lúc này, hệ thống **tin tưởng hoàn toàn** vào dữ liệu cache đã đồng bộ, không thực hiện kiểm tra lại version trong suốt session để tiết kiệm băng thông.
+4. **UX (Quy tắc hiển thị):** Hệ thống bắt buộc hiển thị màn hình chờ "Đang đồng bộ dữ liệu..." và **CHỈ BẮT ĐẦU HIỂN THỊ** màn hình chính / danh sách POI (với tên và mô tả đã được dịch) **SAU KHI** tiến trình dịch thuật này hoàn tất 100%.
+5. Sau khi hoàn thành → Vào màn hình chính. Kể từ lúc này, hệ thống **tin tưởng hoàn toàn** vào dữ liệu cache đã đồng bộ, không thực hiện kiểm tra lại version trong suốt session để tiết kiệm băng thông.
 
 ### 7.3 Màn hình chính User
 
@@ -975,11 +983,12 @@ if __name__ == "__main__":
 | **Hành vi UX** | Có màn hình chờ "Đang đồng bộ..." (nếu cần). | **Chuyển đổi tức thì (Instant switch)** khi đổi ngôn ngữ, không có độ trễ. |
 
 #### Quy trình cập nhật ngôn ngữ UI:
-Khi người dùng thay đổi ngôn ngữ tại màn hình Đăng nhập hoặc Tab Thông tin:
-1. **Nguồn dữ liệu Dropdown:** Hệ thống BẮT BUỘC fetch danh sách ngôn ngữ động từ API hệ thống (bảng `languages` trong Database) để hiển thị các lựa chọn cho người dùng.
-2. **Cơ chế Fallback (Dự phòng):** Thư viện i18n ở Frontend phải được cấu hình một ngôn ngữ mặc định (Tiếng Anh - 'en'). Nếu người dùng chọn một ngôn ngữ từ Dropdown (ví dụ: 'fr') mà ứng dụng CHƯA CÓ file từ điển tĩnh tương ứng (ví dụ: `fr.json`), thì toàn bộ Text Giao diện (nút bấm, tiêu đề) sẽ tự động fallback hiển thị bằng Tiếng Anh.
-3. **Sự độc lập của Nội dung:** Dù UI hiển thị bằng ngôn ngữ Fallback (Tiếng Anh), nhưng luồng dịch ngầm Nội dung/Audio (POI, Tour) VẪN PHẢI gọi API thực thi dịch sang đúng ngôn ngữ User đã chọn (Tiếng Pháp) và lưu vào Database / Cache Local bình thường.
-4. Hệ thống cập nhật `language_code` trong local storage.
+1. **Khởi tạo lần đầu:** Tại lần đầu mở App, hệ thống tự động gán `language_code` dựa trên ngôn ngữ thiết bị (theo logic Auto-detect tại Mục 7.2) thay vì chờ người dùng thao tác ở Dropdown.
+2. **Thay đổi thủ công:** Khi người dùng thay đổi ngôn ngữ tại màn hình Đăng nhập hoặc Tab Thông tin:
+   - **Nguồn dữ liệu Dropdown:** Hệ thống BẮT BUỘC fetch danh sách ngôn ngữ động từ API hệ thống (bảng `languages` trong Database) để hiển thị các lựa chọn cho người dùng.
+   - **Lưu trữ:** Hệ thống cập nhật `language_code` trong local storage.
+3. **Cơ chế Fallback (Dự phòng):** Thư viện i18n ở Frontend phải được cấu hình một ngôn ngữ mặc định (Tiếng Anh - 'en'). Nếu người dùng chọn một ngôn ngữ từ Dropdown (ví dụ: 'fr') mà ứng dụng CHƯA CÓ file từ điển tĩnh tương ứng (ví dụ: `fr.json`), thì toàn bộ Text Giao diện (nút bấm, tiêu đề) sẽ tự động fallback hiển thị bằng Tiếng Anh.
+4. **Sự độc lập của Nội dung:** Dù UI hiển thị bằng ngôn ngữ Fallback (Tiếng Anh), nhưng luồng dịch ngầm Nội dung/Audio (POI, Tour) VẪN PHẢI gọi API thực thi dịch sang đúng ngôn ngữ User đã chọn (Tiếng Pháp) và lưu vào Database / Cache Local bình thường.
 5. Thư viện i18n tự động map lại các key dịch tương ứng từ file JSON cục bộ (hoặc fallback về 'en').
 6. Toàn bộ UI Labels cập nhật ngay lập tức mà không có độ trễ.
 
@@ -1014,6 +1023,7 @@ Khi người dùng thay đổi ngôn ngữ tại màn hình Đăng nhập hoặc
 | BR-21 | **Dịch thuật Tour:** Tính năng dịch đa ngôn ngữ đối với Tour (Tên, Mô tả) chỉ hỗ trợ cho các Tour do Admin tạo. Khi User đăng nhập hoặc đổi ngôn ngữ, App sẽ tự động đồng bộ và gọi dịch ngầm (**On-demand Text-only**) cho các Tour của Admin trong phạm vi gần (20km), đảm bảo User luôn thấy nội dung Tour hiển thị nhất quán bằng ngôn ngữ của họ tương tự như POI. Khi Admin cập nhật nội dung Tour, hệ thống xóa cache bản dịch cũ trong bảng `tour_translations`. |
 | BR-22 | **Quy chuẩn UI Localization:** Tuyệt đối không sử dụng API On-demand (Python) để dịch các thành phần giao diện tĩnh (UI). Mọi text cứng trên giao diện phải được quản lý tập trung qua các file từ điển ngôn ngữ (JSON) phía Frontend. Việc mở rộng ngôn ngữ mới trong tương lai cho giao diện chỉ thực hiện bằng cách bổ sung file JSON tương ứng mà không cần thay đổi cấu trúc Database hoặc Logic Backend. |
 | BR-24 | **Độc lập giữa Ngôn ngữ UI và Nội dung:** Hệ thống luôn lấy danh sách ngôn ngữ động từ Database (`languages` table) làm nguồn chuẩn duy nhất cho các Dropdown lựa chọn. Chấp nhận sự bất đồng bộ giữa số lượng file dịch giao diện (hỗ trợ MVP 5 ngôn ngữ) và số lượng ngôn ngữ nội dung (hỗ trợ 12+). Frontend bắt buộc cấu hình cơ chế Fallback của i18n về Tiếng Anh cho UI nếu thiếu file từ điển, đảm bảo ứng dụng không bị lỗi (crash) khi Admin thêm ngôn ngữ mới vào hệ thống. |
+| BR-25 | **Quy tắc ưu tiên lựa chọn ngôn ngữ (Language Resolution Priority):** Hệ thống quyết định ngôn ngữ hiển thị theo thứ tự ưu tiên giảm dần:<br>(1) Ngôn ngữ User đã chủ động chọn và lưu trong Local Storage (áp dụng cho các lần mở App sau).<br>(2) Ngôn ngữ của thiết bị (nêu mã ngôn ngữ đó tồn tại trong danh sách từ Database - áp dụng cho lần mở App đầu tiên).<br>(3) Mặc định Fallback là Tiếng Anh ('en') (nếu ngôn ngữ thiết bị không được Database hỗ trợ). |
 
 ---
 

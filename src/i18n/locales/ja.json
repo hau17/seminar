@@ -35,5 +35,34 @@
       "lang": "言語を同期中...",
       "preparing": "お選びの言語に合わせてコンテンツを準備しています。少々お待ちください..."
     }
+  },
+    "tour": {
+    "itinerary_details": "旅程の詳細",
+    "itinerary_stops": "ルート ({{count}} か所の停留所)",
+    "click_for_details": "クリックして詳細を表示",
+    "show_on_map": "地図に表示",
+    "view_on_map": "地図で見る",
+    "create_new_itinerary": "新しい旅程を作成",
+    "update_itinerary": "ツアーを更新",
+    "standard_notice": "標準 BR-17 (ホイアン協会)",
+    "tour_name_required": "ツアー名 (必須)",
+    "tour_name_placeholder": "例：ホイアン1日ツアー、ナイトツアー...",
+    "select_pois": "観光スポットを選択",
+    "pois_selected": "{{count}} か所のスポットを選択しました",
+    "search_placeholder": "目的地を検索...",
+    "distance_nearby": "近くに {{distance}}m",
+    "create_itinerary": "旅程を作成",
+    "save_changes": "変更を保存",
+    "change_anytime": "この旅程はいつでも変更できます",
+    "delete_confirm": "このツアーを削除してもよろしいですか？",
+    "delete_fail": "ツアーを削除できませんでした。もう一度お試しください。",
+    "no_pois": "このツアーにはまだスポットがありません。",
+    "my_itinerary": "私の旅程",
+    "edit_tour": "ツアーを編集",
+    "delete_tour": "削除"
+  },
+  "poi": {
+    "now_playing": "再生中: {{name}}",
+    "distance_away": "あなたから {{distance}}m"
   }
 }

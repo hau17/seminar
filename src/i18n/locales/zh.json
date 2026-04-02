@@ -35,5 +35,34 @@
       "lang": "正在同步语言...",
       "preparing": "系统正在准备对应语言的内容，请稍候..."
     }
+  },
+    "tour": {
+    "itinerary_details": "行程详情",
+    "itinerary_stops": "路线 ({{count}} 个停靠点)",
+    "click_for_details": "点击查看详情",
+    "show_on_map": "在地图上显示",
+    "view_on_map": "在地图上查看",
+    "create_new_itinerary": "创建新行程",
+    "update_itinerary": "更新行程",
+    "standard_notice": "标准 BR-17 (会安社会)",
+    "tour_name_required": "行程名称 (必填)",
+    "tour_name_placeholder": "例如：会安1日游，夜游...",
+    "select_pois": "选择景点",
+    "pois_selected": "已选择 {{count}} 个景点",
+    "search_placeholder": "搜索目的地...",
+    "distance_nearby": "附近 {{distance}}米",
+    "create_itinerary": "创建行程",
+    "save_changes": "保存更改",
+    "change_anytime": "您可以随时更改此行程",
+    "delete_confirm": "您确定要删除此行程吗？",
+    "delete_fail": "无法删除行程。请重试。",
+    "no_pois": "此行程中暂无景点。",
+    "my_itinerary": "我的行程",
+    "edit_tour": "编辑行程",
+    "delete_tour": "删除"
+  },
+  "poi": {
+    "now_playing": "正在播放: {{name}}",
+    "distance_away": "距离您 {{distance}}米"
   }
 }

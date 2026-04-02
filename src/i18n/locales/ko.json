@@ -35,5 +35,34 @@
       "lang": "언어 동기화 중...",
       "preparing": "선택하신 언어로 콘텐츠를 준비 중입니다. 잠시만 기다려 주세요..."
     }
+  },
+    "tour": {
+    "itinerary_details": "일정 세부정보",
+    "itinerary_stops": "경로 ({{count}}개 정류장)",
+    "click_for_details": "클릭하여 세부정보 확인",
+    "show_on_map": "지도에 표시",
+    "view_on_map": "지도에서 보기",
+    "create_new_itinerary": "새 일정 만들기",
+    "update_itinerary": "투어 업데이트",
+    "standard_notice": "표준 BR-17 (호이안 소사이어티)",
+    "tour_name_required": "투어 이름 (필수)",
+    "tour_name_placeholder": "예: 호이안 1일 투어, 야간 투어...",
+    "select_pois": "명소 선택",
+    "pois_selected": "{{count}}개 명소 선택됨",
+    "search_placeholder": "목적지 검색...",
+    "distance_nearby": "근처 {{distance}}m",
+    "create_itinerary": "일정 만들기",
+    "save_changes": "변경 사항 저장",
+    "change_anytime": "이 일정은 언제든지 변경할 수 있습니다",
+    "delete_confirm": "이 투어를 삭제하시겠습니까?",
+    "delete_fail": "투어를 삭제할 수 없습니다. 다시 시도해주세요.",
+    "no_pois": "이 투어에는 아직 명소가 없습니다.",
+    "my_itinerary": "내 일정",
+    "edit_tour": "투어 편집",
+    "delete_tour": "삭제"
+  },
+  "poi": {
+    "now_playing": "재생 중: {{name}}",
+    "distance_away": "당신에게서 {{distance}}m 거리"
   }
 }
